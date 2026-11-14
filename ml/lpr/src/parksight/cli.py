@@ -47,6 +47,14 @@ def main():
             command.add_argument("--split", choices=["val", "test"], default="test")
             command.add_argument("--real-manifest", type=Path)
             command.add_argument("--latency-samples", type=int, default=50)
+    exporting = commands.add_parser(
+        "export", help="Export ONNX models and verify CPU output parity"
+    )
+    exporting.add_argument("--detector", type=Path, required=True)
+    exporting.add_argument("--ocr", type=Path, required=True)
+    exporting.add_argument("--dataset", type=Path, required=True)
+    exporting.add_argument("--output", type=Path, required=True)
+    exporting.add_argument("--detector-size", type=int, default=640)
     args = parser.parse_args()
     try:
         dispatch(args)
@@ -55,7 +63,18 @@ def main():
 
 
 def dispatch(args):
-    if args.command == "assets":
+    if args.command == "export":
+        from parksight.exporting import export_models
+
+        print(
+            json.dumps(
+                export_models(
+                    args.detector, args.ocr, args.dataset, args.output, args.detector_size
+                ),
+                indent=2,
+            )
+        )
+    elif args.command == "assets":
         from parksight.assets import download_detector, prepare_assets
 
         print(json.dumps(prepare_assets(args.output), indent=2))
