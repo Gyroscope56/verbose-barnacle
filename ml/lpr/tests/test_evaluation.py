@@ -1,7 +1,7 @@
 import pytest
 from PIL import Image
 
-from parksight.evaluate import summarize_predictions
+from parksight.evaluate import summarize_predictions, text_metrics
 from parksight.generate import crop_plate
 
 
@@ -42,3 +42,10 @@ def test_invalid_crop_rejected_and_padding_clipped():
     assert crop_plate(image, [0, 0, 100, 50], 0.1).size == (100, 50)
     with pytest.raises(ValueError):
         crop_plate(image, [90, 10, 10, 20])
+
+
+def test_crop_text_metrics_include_every_target_and_character():
+    metrics = text_metrics(["AAB12", "XYZ99"], ["AAB12", "XY99"])
+    assert metrics == {"count": 2, "exact_accuracy": 0.5, "character_error_rate": 0.1}
+    with pytest.raises(ValueError):
+        text_metrics(["AAB12"], [])

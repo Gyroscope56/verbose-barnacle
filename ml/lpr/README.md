@@ -122,6 +122,8 @@ Use validation results to choose thresholds before evaluating the test partition
 
 Evaluation saves JSON metrics, per-image predictions, a visual prediction sheet, and a Markdown report. It reports detector precision/recall and mAP, ground-truth-crop OCR exact-string accuracy and character error rate, end-to-end exact-string accuracy, negative-frame false-positive rate, and breakdowns by style, scene, size, and difficulty. End-to-end matches require IoU >= 0.5; missed or misplaced detections count as failures. Character error rate is edit distance divided by ground-truth character count. Metrics with no applicable samples are null.
 
+Synthetic evaluation also measures every held-out OCR crop, including the additional generated crops, separately from crops taken from full-scene ground-truth boxes. The report includes the sample count for each view.
+
 Latency measures warmed batch-one inference, includes preprocessing/postprocessing, synchronizes GPU work, and excludes disk reads. Reports include median, p95, device, resolution, warm-up, and sample count. Mac latency does not establish UNO Q performance.
 
 ### Real webcam validation

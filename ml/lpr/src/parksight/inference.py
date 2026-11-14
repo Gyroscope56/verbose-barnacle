@@ -27,7 +27,6 @@ class Pipeline:
         self.detector_size = detector_size
         self.threshold = threshold
         self.detector_path, self.ocr_path = detector, ocr
-        self.last_ocr_seconds = 0.0
 
     @torch.inference_mode()
     def recognize(self, images: list[Image.Image]):

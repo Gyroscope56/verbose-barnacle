@@ -20,6 +20,22 @@ def edit_distance(a: str, b: str) -> int:
     return previous[-1]
 
 
+def text_metrics(truths: list[str], predictions: list[str]) -> dict:
+    if len(truths) != len(predictions):
+        raise ValueError("Text targets and predictions must have equal lengths")
+    characters = sum(map(len, truths))
+    return {
+        "count": len(truths),
+        "exact_accuracy": sum(a == b for a, b in zip(truths, predictions)) / len(truths)
+        if truths
+        else None,
+        "character_error_rate": sum(edit_distance(a, b) for a, b in zip(truths, predictions))
+        / characters
+        if characters
+        else None,
+    }
+
+
 def iou(a, b):
     intersection = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(
         0, min(a[3], b[3]) - max(a[1], b[1])
@@ -140,19 +156,19 @@ def evaluate_dataset(
     metrics = summarize_predictions(rows, predictions)
     metrics["domain"] = "real_camera" if real_manifest else "synthetic"
     metrics["split"] = split
-    metrics["ground_truth_crop_ocr"] = {
-        "count": len(crop_truths),
-        "exact_accuracy": sum(a == b for a, b in zip(crop_truths, crop_predictions))
-        / len(crop_truths)
-        if crop_truths
-        else None,
-        "character_error_rate": sum(
-            edit_distance(a, b) for a, b in zip(crop_truths, crop_predictions)
-        )
-        / sum(map(len, crop_truths))
-        if crop_truths
-        else None,
-    }
+    metrics["ground_truth_crop_ocr"] = text_metrics(crop_truths, crop_predictions)
+    if not real_manifest:
+        crop_rows = [r for r in read_records(root / "crops.jsonl") if r["split"] == split]
+        all_truths, all_predictions = [], []
+        for offset in range(0, len(crop_rows), 64):
+            batch = crop_rows[offset : offset + 64]
+            images = []
+            for row in batch:
+                with Image.open(root / row["crop"]) as image:
+                    images.append(image.convert("RGB"))
+            all_truths.extend(row["text"] for row in batch)
+            all_predictions.extend(text for text, _ in pipeline.recognize(images))
+        metrics["held_out_ocr_crops"] = text_metrics(all_truths, all_predictions)
     groups = defaultdict(list)
     for index, row in enumerate(rows):
         for key in ("style", "scene", "difficulty"):
