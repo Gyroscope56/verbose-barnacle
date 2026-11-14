@@ -1,0 +1,17 @@
+seed = 42
+scenes = 10000
+crops = 30000
+width = 640
+height = 480
+negative_fraction = 0.08
+hard_fraction = 0.2
+assets = 'assets'
+device = 'auto'
+detector_epochs = 12
+detector_batch = 16
+detector_size = 640
+detector_hours = 1.5
+ocr_epochs = 20
+ocr_batch = 128
+ocr_minutes = 90
+learning_rate = 0.001

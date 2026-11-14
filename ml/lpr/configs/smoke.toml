@@ -1,0 +1,12 @@
+seed = 7
+scenes = 60
+crops = 120
+width = 320
+height = 240
+detector_size = 320
+detector_epochs = 1
+detector_batch = 8
+detector_hours = 0.05
+ocr_epochs = 1
+ocr_batch = 16
+ocr_minutes = 3
