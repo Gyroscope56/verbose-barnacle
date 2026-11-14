@@ -1,0 +1,124 @@
+{
+  "breakdowns": {
+    "difficulty/controlled": {
+      "end_to_end_character_error_rate": 0.007359125315391085,
+      "end_to_end_exact_accuracy": 0.9551630434782609,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 81,
+      "positive_scenes": 736
+    },
+    "difficulty/hard": {
+      "end_to_end_character_error_rate": 0.03637976929902396,
+      "end_to_end_exact_accuracy": 0.8117647058823529,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 13,
+      "positive_scenes": 170
+    },
+    "plate_width/100_to_199": {
+      "end_to_end_character_error_rate": 0.008806262230919765,
+      "end_to_end_exact_accuracy": 0.9423076923076923,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": null,
+      "negative_scenes": 0,
+      "positive_scenes": 156
+    },
+    "plate_width/200_plus": {
+      "end_to_end_character_error_rate": 0.013783172186792841,
+      "end_to_end_exact_accuracy": 0.9253333333333333,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": null,
+      "negative_scenes": 0,
+      "positive_scenes": 750
+    },
+    "scene/indoor": {
+      "end_to_end_character_error_rate": 0.008336112037345782,
+      "end_to_end_exact_accuracy": 0.9481641468682506,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 52,
+      "positive_scenes": 463
+    },
+    "scene/vehicle": {
+      "end_to_end_character_error_rate": 0.01768377253814147,
+      "end_to_end_exact_accuracy": 0.90744920993228,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 42,
+      "positive_scenes": 443
+    },
+    "style/IL": {
+      "end_to_end_character_error_rate": 0.011534603811434303,
+      "end_to_end_exact_accuracy": 0.9278688524590164,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 33,
+      "positive_scenes": 305
+    },
+    "style/MN": {
+      "end_to_end_character_error_rate": 0.011229946524064172,
+      "end_to_end_exact_accuracy": 0.9375,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 29,
+      "positive_scenes": 288
+    },
+    "style/WI": {
+      "end_to_end_character_error_rate": 0.0158494304110946,
+      "end_to_end_exact_accuracy": 0.9201277955271565,
+      "matched_detection_recall_iou50": 1.0,
+      "negative_false_positive_rate": 0.0,
+      "negative_scenes": 32,
+      "positive_scenes": 313
+    }
+  },
+  "detection_threshold": 0.25,
+  "detector": {
+    "map50": 0.995,
+    "map50_95": 0.9949999999999999,
+    "precision": 0.999951070511001,
+    "recall": 1.0
+  },
+  "domain": "synthetic",
+  "end_to_end_character_error_rate": 0.012918578956314805,
+  "end_to_end_exact_accuracy": 0.9282560706401766,
+  "ground_truth_crop_ocr": {
+    "character_error_rate": 0.015128335883052865,
+    "count": 906,
+    "exact_accuracy": 0.9139072847682119
+  },
+  "held_out_ocr_crops": {
+    "character_error_rate": 0.018214550460658688,
+    "count": 2906,
+    "exact_accuracy": 0.903303509979353
+  },
+  "latency": {
+    "batch_size": 1,
+    "detector_size": 640,
+    "device": "mps",
+    "disk_io_included": false,
+    "input_sizes": [
+      [
+        640,
+        480
+      ]
+    ],
+    "median_ms": 10.987104004016146,
+    "p95_ms": 11.569441836036276,
+    "pre_and_postprocessing_included": true,
+    "samples": 50,
+    "warmup": 5
+  },
+  "matched_detection_recall_iou50": 1.0,
+  "models": {
+    "detector_sha256": "f46f4489cdd2939316762ca34c5b58578b0ff9b6d2ca811f6722a0c8d5fd30f9",
+    "ocr_sha256": "25a42776eb250e12d02d1ad0442771b7ef6c468d931f992d6128d6263868b2ce"
+  },
+  "negative_false_positive_rate": 0.0,
+  "negative_scenes": 94,
+  "ocr_score_note": "Geometric mean of emitted-character maximum probabilities; uncalibrated.",
+  "photographic_backgrounds": 0,
+  "positive_scenes": 906,
+  "split": "test"
+}

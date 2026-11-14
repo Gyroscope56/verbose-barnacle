@@ -176,3 +176,7 @@ parksight export --dataset data/baseline --detector runs/baseline-detector/weigh
 ```
 
 Export uses CPU and fixed batch-one inputs with ONNX opset 18. It checks raw outputs against PyTorch on up to six generated validation scenes/crops and checks OCR decoded text. It writes `detector.onnx`, `ocr.onnx`, and `metadata.json` with hashes, preprocessing, vocabulary, tolerances, and observed errors. A failed check leaves an `INCOMPLETE` marker. Detector output still needs host confidence filtering, NMS, and inverse letterbox coordinate mapping; OCR output needs CTC decoding. This is a portable export check, not an UNO Q runtime or accelerator validation.
+
+## Measured baseline
+
+The [14 November synthetic baseline report](docs/results/2026-11-14-baseline.md) records 92.83% full-pipeline exact text, 95.52% on controlled scenes, and 10.99 ms median MPS latency. These are generated-image results on this Mac. Real-camera and UNO Q performance remain unverified.

@@ -98,13 +98,13 @@
 
 **Files:** Complete `README.md`, `ASSETS.md`, reproducibility manifest, and the generated local run report. Optional export module only if time remains after baseline verification.
 
-- [ ] Run all focused tests and smoke commands. Inspect the generated preview and prediction sheets; correct invalid labels or unreadable rendering before the larger run.
-- [ ] Generate the baseline dataset and train the detector/OCR with bounded initial budgets, monitoring elapsed time, memory, losses, and validation. Adjust runtime/counts only as permitted by the design; record every resolved value. Do not tune against held-out test scores.
-- [ ] Reload selected checkpoints and evaluate the held-out synthetic test partition. Report completed epochs, actual dataset sizes, metrics, Mac latency, and procedural-versus-photographic background coverage. Preserve an unsuccessful baseline as a measured result rather than claiming an accuracy target was met.
-- [ ] Document installation, generation, printing, training/resume, image prediction, evaluation, real capture annotation format, and RTX CUDA setup requirements. Include synthetic-domain and confidence-score limitations and the AGPL/model asset notices.
-- [ ] If time permits, export both models to ONNX and compare logits/boxes on representative real generated inputs before documenting export as verified. Do not imply UNO Q deployment is tested.
-- [ ] Run final tests, `git diff --check`, CLI examples, and a fresh image-inference command against saved artifacts. Review the final patch for scope and maintainability, leaving existing staged IDE files untouched. Do not create commits unless requested by the user.
+- [x] Run all focused tests and smoke commands. Inspect the generated preview and prediction sheets; correct invalid labels or unreadable rendering before the larger run.
+- [x] Generate the baseline dataset and train the detector/OCR with bounded initial budgets, monitoring elapsed time, memory, losses, and validation. Adjust runtime/counts only as permitted by the design; record every resolved value. Do not tune against held-out test scores.
+- [x] Reload selected checkpoints and evaluate the held-out synthetic test partition. Report completed epochs, actual dataset sizes, metrics, Mac latency, and procedural-versus-photographic background coverage. Preserve an unsuccessful baseline as a measured result rather than claiming an accuracy target was met.
+- [x] Document installation, generation, printing, training/resume, image prediction, evaluation, real capture annotation format, and RTX CUDA setup requirements. Include synthetic-domain and confidence-score limitations and the AGPL/model asset notices.
+- [x] If time permits, export both models to ONNX and compare logits/boxes on representative real generated inputs before documenting export as verified. Do not imply UNO Q deployment is tested.
+- [x] Run final tests, `git diff --check`, CLI examples, and a fresh image-inference command against saved artifacts. Review the final patch for scope and maintainability, leaving existing staged IDE files untouched. Do not create commits unless requested by the user.
 
 ## Execution status
 
-Native execution selected by the user. Tasks 1-4 completed with real generation, MPS smoke training, image prediction, and evaluation. Final training, reporting, and requested repository migration are in progress. Independent review found two resume provenance issues; both were fixed with regression tests. Current suite: 24 passing tests.
+Native execution complete. Training finished with 20 OCR epochs and exactly 12 detector epochs. The final synthetic test, fresh-image prediction, and selected-model ONNX parity checks completed. The local suite has 27 passing tests. See `docs/results/2026-11-14-baseline.md` for measured results. User-requested repository migration is in PR #1 of Gyroscope56/verbose-barnacle on `feature/lpr-synthetic-training`, labeled `ML_GEN`.
