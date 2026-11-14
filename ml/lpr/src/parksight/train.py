@@ -3,6 +3,7 @@ import json
 import os
 import random
 import time
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -252,6 +253,11 @@ def train_ocr(config: Config, dataset: Path, output: Path, resume: Path | None =
     return output / "best.pt"
 
 
+def enforce_epoch_cap(trainer, max_epochs: int):
+    # Ultralytics time mode re-estimates epochs after every epoch.
+    trainer.stop |= trainer.epoch + 1 >= max_epochs
+
+
 def train_detector(config: Config, dataset: Path, output: Path, resume: Path | None = None) -> Path:
     check_resume_location(resume, output, detector=True)
     # Keep Ultralytics settings and caches within the project.
@@ -296,6 +302,9 @@ def train_detector(config: Config, dataset: Path, output: Path, resume: Path | N
     if not weights.exists():
         raise FileNotFoundError(f"Missing {weights}; run parksight assets --detector first")
     model = YOLO(str(weights))
+    model.add_callback(
+        "on_fit_epoch_end", partial(enforce_epoch_cap, max_epochs=config.detector_epochs)
+    )
     try:
         model.train(
             data=str((dataset / "dataset.yaml").resolve()),

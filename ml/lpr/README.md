@@ -95,7 +95,7 @@ parksight train-detector --config configs/baseline.toml --dataset data/baseline 
 
 OCR uses RGB inputs padded to 192 by 64 pixels, a convolutional sequence network, and CTC over uppercase A-Z and digits. Display separators are excluded. Adjacent repeated characters are preserved when separated by a CTC blank. No whitelist alters predictions.
 
-The baseline budgets are 20 OCR epochs or 90 minutes, and 12 detector epochs with a 1.5-hour time budget. Ultralytics can adjust its epoch schedule when a time budget is supplied; inspect the actual completed epochs in its log/results. Checkpoint selection uses validation only. OCR saves optimizer state, last/best model, preprocessing, vocabulary, data/config fingerprints, dependency versions, and history. Interrupting saves resumable state. Mid-epoch resume restarts that epoch with the saved weights; it is not an exact continuation of the interrupted minibatch sequence. Use separate output directories for independent experiments.
+The baseline budgets are 20 OCR epochs or 90 minutes, and a hard cap of 12 detector epochs with a 1.5-hour time budget. Ultralytics can expand its displayed schedule in time mode; an epoch-end callback enforces the configured epoch cap. Checkpoint selection uses validation only. OCR saves optimizer state, last/best model, preprocessing, vocabulary, data/config fingerprints, dependency versions, and history. Interrupting saves resumable state. Mid-epoch resume restarts that epoch with the saved weights; it is not an exact continuation of the interrupted minibatch sequence. Use separate output directories for independent experiments.
 
 ```sh
 parksight train-ocr --config configs/baseline.toml --dataset data/baseline \

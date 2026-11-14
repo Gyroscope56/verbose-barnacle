@@ -8,6 +8,22 @@ from parksight.records import write_json
 from parksight.train import check_resume, dataset_hash, train_detector, train_ocr
 
 
+def test_detector_epoch_cap_overrides_time_schedule_without_clearing_existing_stop():
+    from types import SimpleNamespace
+
+    from parksight.train import enforce_epoch_cap
+
+    trainer = SimpleNamespace(epoch=10, stop=False, epochs=28)
+    enforce_epoch_cap(trainer, 12)
+    assert trainer.stop is False
+    trainer.epoch = 11
+    enforce_epoch_cap(trainer, 12)
+    assert trainer.stop is True
+    trainer.epoch = 1
+    enforce_epoch_cap(trainer, 12)
+    assert trainer.stop is True
+
+
 def test_resume_rejects_different_dataset_or_vocabulary():
     checkpoint = {"dataset_hash": "a", "vocabulary": "abc", "image_size": [192, 64]}
     with pytest.raises(ValueError, match="dataset"):
