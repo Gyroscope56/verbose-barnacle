@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "spot": "REPLACE_WITH_RESERVED_TEST_SPOT",
+  "operator_token": "",
+  "database": {
+    "host": "",
+    "password": "",
+    "user": "app_user",
+    "dbname": "databricks_postgres",
+    "port": 5432,
+    "sslmode": "require"
+  }
+}

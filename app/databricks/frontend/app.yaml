@@ -1,0 +1,8 @@
+command:
+  - gunicorn
+  - app:app
+  - --bind
+  - 0.0.0.0:8000
+env:
+  - name: PARKSIGHT_API_URL
+    value: https://my-web-api-7474648110463211.aws.databricksapps.com

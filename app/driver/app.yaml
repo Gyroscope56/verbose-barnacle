@@ -1,0 +1,24 @@
+command:
+  - streamlit
+  - run
+  - app.py
+  - --server.port
+  - "8000"
+  - --server.address
+  - "0.0.0.0"
+  - --server.headless
+  - "true"
+
+# Connection details come from the environment. The password is a Databricks
+# secret attached to the app as the "db-password" resource; never commit it.
+env:
+  - name: PARKING_DB_HOST
+    value: "ep-spring-lake-d8d06cdv.database.us-east-2.cloud.databricks.com"
+  - name: PARKING_DB_NAME
+    value: "databricks_postgres"
+  - name: PARKING_DB_USER
+    value: "app_user"
+  - name: PARKING_DB_PASSWORD
+    valueFrom: db-password
+  - name: GENIE_SPACE_ID
+    valueFrom: genie-space

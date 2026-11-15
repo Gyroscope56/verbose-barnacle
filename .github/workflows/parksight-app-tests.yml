@@ -1,0 +1,40 @@
+name: ParkSight app checks
+on:
+  pull_request:
+    paths: ['app/**', '.github/workflows/parksight-app-tests.yml']
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/parksight-app-tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: parksight-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PARKSIGHT_TEST_POSTGRES: postgresql://postgres:parksight-test@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r app/uno-q/lakebase-requirements.txt
+      - run: python -m unittest discover -s app/tests -v
+      - run: >-
+          python -m pip install
+          -r app/databricks/api/requirements.txt
+          -r app/databricks/frontend/requirements.txt
+          httpx opencv-python-headless
+      - run: python -m unittest discover -s app/databricks/tests -v
+      - run: node --check app/databricks/frontend/static/setup.js

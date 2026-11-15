@@ -1,0 +1,5 @@
+English PP-OCRv4 mobile recognizer
+Upstream model by PaddleOCR contributors. ONNX conversion distributed by RapidAI/RapidOCR.
+Source: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv4/rec/en_PP-OCRv4_rec_mobile.onnx
+Model attribution: https://rapidai.github.io/RapidOCRDocs/main/en/model_licenses/
+License: Apache-2.0. See ocr-LICENSE.txt.

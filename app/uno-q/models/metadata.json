@@ -1,0 +1,48 @@
+{
+  "batch_size": 1,
+  "detector": {
+    "input": [
+      1,
+      3,
+      320,
+      320
+    ],
+    "normalization": "RGB float32 /255; centered letterbox padding value 114",
+    "output": "raw YOLO11 single-class boxes and scores; apply confidence filtering, NMS, and inverse letterbox mapping on host"
+  },
+  "detector_parity": {
+    "atol": 0.001,
+    "max_absolute_error": 0.0050048828125,
+    "rtol": 0.001,
+    "samples": 6
+  },
+  "ocr": {
+    "name": "English PP-OCRv4 mobile",
+    "source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv4/rec/en_PP-OCRv4_rec_mobile.onnx",
+    "license": "Apache-2.0",
+    "input": [
+      1,
+      3,
+      48,
+      "dynamic_width"
+    ],
+    "normalization": "BGR float32 /127.5 -1; isolate character row; 48 pixels high; zero pad on right",
+    "output": "CTC scores with character vocabulary in ONNX metadata"
+  },
+  "onnx_sha256": {
+    "detector.onnx": "58350be27a22651e033b60a458285e6d59c440b05c2eb6c99e8ce948c245504a",
+    "ocr.onnx": "e8770c967605983d1570cdf5352041dfb68fa0c21664f49f47b155abd3e0e318"
+  },
+  "opset": 18,
+  "provider": "CPUExecutionProvider",
+  "source_detector_sha256": "d891120786c37ecaaa400252d4e58f7232773de00cd7b0d0f5aa968c45947117",
+  "uno_q_verified": false,
+  "validation_images": [
+    "images/val/0001920.jpg",
+    "images/val/0001964.jpg",
+    "images/val/0002014.jpg",
+    "images/val/0002065.jpg",
+    "images/val/0002112.jpg",
+    "images/val/0002159.jpg"
+  ]
+}
