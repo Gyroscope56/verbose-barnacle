@@ -16,6 +16,11 @@ MO MS MT NC ND NE NH NJ NM NV NY OH OK OR PA RI SC SD TN TX UT VA VT WA WI WV WY
 
 
 def apply_read(conn, zone, plate):
+    """Apply a read and return (zone, outcome).
+
+    zone "auto" (manual operator runs) closes the visit when the plate is inside
+    and otherwise treats the read as an entry.
+    """
     sessions = conn.execute(
         """SELECT license_plate, has_entrance_ticket, time_in
            FROM g_sessions
@@ -27,22 +32,25 @@ def apply_read(conn, zone, plate):
            ORDER BY license_plate LIMIT 2 FOR UPDATE""",
         (plate, STATE_PREFIXES, plate),
     ).fetchall()
+    if zone == "auto":
+        inside = len(sessions) == 1 and sessions[0][2] is not None
+        zone = "exit" if inside else "entry"
     if len(sessions) > 1:
-        return "ambiguous"
+        return zone, "ambiguous"
     if not sessions:
-        return "unbooked" if zone == "entry" else "not_inside"
+        return zone, "unbooked" if zone == "entry" else "not_inside"
 
     key, has_ticket, time_in = sessions[0]
     connection = partial(nullcontext, conn)
     if zone == "entry":
         if time_in is not None:
-            return "already_inside"
+            return zone, "already_inside"
         if not has_ticket:
-            return "denied"
-        return enter(key, connection=connection).status
+            return zone, "denied"
+        return zone, enter(key, connection=connection).status
     if time_in is None:
-        return "not_inside"
-    return exit_garage(key, connection=connection).status
+        return zone, "not_inside"
+    return zone, exit_garage(key, connection=connection).status
 
 
 def record_read(conn, camera_id, event_id, zone, plate):
@@ -51,7 +59,8 @@ def record_read(conn, camera_id, event_id, zone, plate):
            VALUES (%s, %s, %s, %s, 'pending')
            ON CONFLICT (camera_id, event_id) DO NOTHING
            RETURNING event_id""",
-        (camera_id, event_id, zone, plate),
+        # "auto" is resolved below, in the same transaction, before commit.
+        (camera_id, event_id, "entry" if zone == "auto" else zone, plate),
     ).fetchone()
     if created is None:
         outcome, = conn.execute(
@@ -61,10 +70,10 @@ def record_read(conn, camera_id, event_id, zone, plate):
         ).fetchone()
         return {"outcome": outcome}
 
-    outcome = apply_read(conn, zone, plate)
+    zone, outcome = apply_read(conn, zone, plate)
     conn.execute(
-        """UPDATE parksight_garage_events SET outcome = %s
+        """UPDATE parksight_garage_events SET zone = %s, outcome = %s
            WHERE camera_id = %s AND event_id = %s""",
-        (outcome, camera_id, event_id),
+        (zone, outcome, camera_id, event_id),
     )
     return {"outcome": outcome}

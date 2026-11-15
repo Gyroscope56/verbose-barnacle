@@ -338,6 +338,26 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
                          {"outcome": "ambiguous"})
 
+    def test_manual_auto_reads_enter_then_exit_booked_visit(self):
+        path = "/api/camera-setup/device/garage-read"
+        with self.connect() as conn:
+            conn.execute("INSERT INTO g_sessions VALUES ('WI-ABC-1234', TRUE, NULL, NULL)")
+        auto = {"id": str(uuid4()), "zone": "auto", "plate": "ABC1234"}
+        self.assertEqual(self.api.post(path, json=auto, headers=DEVICE).json(),
+                         {"outcome": "inside"})
+        auto["id"] = str(uuid4())
+        for _ in range(2):
+            self.assertEqual(self.api.post(path, json=auto, headers=DEVICE).json(),
+                             {"outcome": "exited"})
+        with self.connect() as conn:
+            zones = [row[0] for row in conn.execute(
+                "SELECT zone FROM parksight_garage_events ORDER BY received_at")]
+            self.assertEqual(zones, ["entry", "exit"])
+            self.assertEqual(conn.execute("SELECT count(*) FROM g_sessions").fetchone()[0], 0)
+        unknown = {"id": str(uuid4()), "zone": "auto", "plate": "XYZ9876"}
+        self.assertEqual(self.api.post(path, json=unknown, headers=DEVICE).json(),
+                         {"outcome": "unbooked"})
+
     def test_debug_feed_requires_operator_and_active_view(self):
         base = "/api/camera-setup"
         view = base + "/debug/view"
