@@ -1,0 +1,9 @@
+.cache/
+*.bak
+*.bak[0-9]
+*.onnx
+*.whl
+*.whl.installed
+python-libraries/
+lakebase.json
+python/lakebase_backend/

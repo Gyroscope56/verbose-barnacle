@@ -1,0 +1,5 @@
+name: ParkSight Camera Starter - Offline Dashboard
+description: Webcam motion detection, Modulino stall occupancy and offline Wi-Fi log dashboard
+icon: 🚗
+ports: [5001]
+bricks: []

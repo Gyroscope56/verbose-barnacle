@@ -1,0 +1,2 @@
+# OpenCV and NumPy ship in the App Lab Python image.
+# The dashboard uses only the Python standard library; no pip installs required.
