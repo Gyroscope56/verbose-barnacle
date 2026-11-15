@@ -155,6 +155,11 @@ class CaptureTest(unittest.TestCase):
     def connect(self):
         return self.psycopg.connect(DB, options=f"-c search_path={self.schema}")
 
+    def drop_role(self, role):
+        with self.psycopg.connect(DB) as conn:
+            conn.execute(f"DROP OWNED BY {role}")
+            conn.execute(f"DROP ROLE {role}")
+
     def drop_schema(self):
         with self.psycopg.connect(DB) as conn:
             conn.execute(f"DROP SCHEMA {self.schema} CASCADE")
@@ -340,14 +345,32 @@ class CaptureTest(unittest.TestCase):
 
     def test_manual_auto_reads_enter_then_exit_booked_visit(self):
         path = "/api/camera-setup/device/garage-read"
+        # Mirror the deployed API role: it may update only an event's outcome.
+        role = f"garage_api_{uuid4().hex[:12]}"
         with self.connect() as conn:
             conn.execute("INSERT INTO g_sessions VALUES ('WI-ABC-1234', TRUE, NULL, NULL)")
+            conn.execute(f"CREATE ROLE {role}")
+            conn.execute(f"GRANT USAGE ON SCHEMA {self.schema} TO {role}")
+            conn.execute(f"GRANT SELECT, INSERT ON parksight_garage_events TO {role}")
+            conn.execute(f"GRANT UPDATE (outcome) ON parksight_garage_events TO {role}")
+            conn.execute(f"GRANT ALL ON g_sessions, garage_visit_history TO {role}")
+        self.addCleanup(self.drop_role, role)
+
+        def connect_as_api():
+            conn = self.connect()
+            conn.execute(f"SET ROLE {role}")
+            return conn
+
+        app = FastAPI()
+        app.include_router(camera_setup_router(
+            connect_as_api, "entrance-camera", {"operator"}, "device-key", record_read))
+        api = TestClient(app)
         auto = {"id": str(uuid4()), "zone": "auto", "plate": "ABC1234"}
-        self.assertEqual(self.api.post(path, json=auto, headers=DEVICE).json(),
+        self.assertEqual(api.post(path, json=auto, headers=DEVICE).json(),
                          {"outcome": "inside"})
         auto["id"] = str(uuid4())
         for _ in range(2):
-            self.assertEqual(self.api.post(path, json=auto, headers=DEVICE).json(),
+            self.assertEqual(api.post(path, json=auto, headers=DEVICE).json(),
                              {"outcome": "exited"})
         with self.connect() as conn:
             zones = [row[0] for row in conn.execute(
@@ -355,7 +378,7 @@ class CaptureTest(unittest.TestCase):
             self.assertEqual(zones, ["entry", "exit"])
             self.assertEqual(conn.execute("SELECT count(*) FROM g_sessions").fetchone()[0], 0)
         unknown = {"id": str(uuid4()), "zone": "auto", "plate": "XYZ9876"}
-        self.assertEqual(self.api.post(path, json=unknown, headers=DEVICE).json(),
+        self.assertEqual(api.post(path, json=unknown, headers=DEVICE).json(),
                          {"outcome": "unbooked"})
 
     def test_debug_feed_requires_operator_and_active_view(self):

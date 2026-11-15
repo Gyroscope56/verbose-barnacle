@@ -15,13 +15,9 @@ MO MS MT NC ND NE NH NJ NM NV NY OH OK OR PA RI SC SD TN TX UT VA VT WA WI WV WY
 """.split()
 
 
-def apply_read(conn, zone, plate):
-    """Apply a read and return (zone, outcome).
-
-    zone "auto" (manual operator runs) closes the visit when the plate is inside
-    and otherwise treats the read as an entry.
-    """
-    sessions = conn.execute(
+def find_sessions(conn, plate):
+    """Lock and return at most two garage sessions matching a normalized plate."""
+    return conn.execute(
         """SELECT license_plate, has_entrance_ticket, time_in
            FROM g_sessions
            WHERE regexp_replace(upper(license_plate), '[^A-Z0-9]', '', 'g') = %s
@@ -32,35 +28,45 @@ def apply_read(conn, zone, plate):
            ORDER BY license_plate LIMIT 2 FOR UPDATE""",
         (plate, STATE_PREFIXES, plate),
     ).fetchall()
-    if zone == "auto":
-        inside = len(sessions) == 1 and sessions[0][2] is not None
-        zone = "exit" if inside else "entry"
+
+
+def resolve_zone(sessions, zone):
+    """Manual operator runs send "auto": exit when the plate is inside, else entry."""
+    if zone != "auto":
+        return zone
+    return "exit" if len(sessions) == 1 and sessions[0][2] is not None else "entry"
+
+
+def apply_read(conn, zone, plate, sessions):
     if len(sessions) > 1:
-        return zone, "ambiguous"
+        return "ambiguous"
     if not sessions:
-        return zone, "unbooked" if zone == "entry" else "not_inside"
+        return "unbooked" if zone == "entry" else "not_inside"
 
     key, has_ticket, time_in = sessions[0]
     connection = partial(nullcontext, conn)
     if zone == "entry":
         if time_in is not None:
-            return zone, "already_inside"
+            return "already_inside"
         if not has_ticket:
-            return zone, "denied"
-        return zone, enter(key, connection=connection).status
+            return "denied"
+        return enter(key, connection=connection).status
     if time_in is None:
-        return zone, "not_inside"
-    return zone, exit_garage(key, connection=connection).status
+        return "not_inside"
+    return exit_garage(key, connection=connection).status
 
 
 def record_read(conn, camera_id, event_id, zone, plate):
+    # Lock the matching sessions first so "auto" is resolved before the event is
+    # stored; the API role may update only the event's outcome afterwards.
+    sessions = find_sessions(conn, plate)
+    zone = resolve_zone(sessions, zone)
     created = conn.execute(
         """INSERT INTO parksight_garage_events (camera_id, event_id, zone, plate, outcome)
            VALUES (%s, %s, %s, %s, 'pending')
            ON CONFLICT (camera_id, event_id) DO NOTHING
            RETURNING event_id""",
-        # "auto" is resolved below, in the same transaction, before commit.
-        (camera_id, event_id, "entry" if zone == "auto" else zone, plate),
+        (camera_id, event_id, zone, plate),
     ).fetchone()
     if created is None:
         outcome, = conn.execute(
@@ -70,10 +76,10 @@ def record_read(conn, camera_id, event_id, zone, plate):
         ).fetchone()
         return {"outcome": outcome}
 
-    zone, outcome = apply_read(conn, zone, plate)
+    outcome = apply_read(conn, zone, plate, sessions)
     conn.execute(
-        """UPDATE parksight_garage_events SET zone = %s, outcome = %s
+        """UPDATE parksight_garage_events SET outcome = %s
            WHERE camera_id = %s AND event_id = %s""",
-        (zone, outcome, camera_id, event_id),
+        (outcome, camera_id, event_id),
     )
     return {"outcome": outcome}
