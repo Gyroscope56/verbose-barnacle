@@ -16,6 +16,7 @@ from time import monotonic
 import cv2
 import numpy as np
 from arduino.app_utils import App, Bridge
+from garage_sync import LakebaseIntegration
 from log_dashboard import LiveLogStore, configure_logging, start_web_server
 from plate_crop import crop_quality, straighten_plate
 from plate_line_ocr import PlateLineRecognizer, normalize_plate
@@ -73,6 +74,7 @@ DETECTOR_THRESHOLD = 0.35
 _detector = None
 _ocr = None
 _models_failed = False
+_lakebase = None
 
 
 def get_models():
@@ -270,6 +272,8 @@ def poll_stall(last_stall):
         stall = str(Bridge.call("stall_state", timeout=0.25))
     except BRIDGE_ERRORS:
         stall = "unknown (Bridge unavailable)"
+    if _lakebase is not None:
+        _lakebase.sync.observe(stall)
     if stall != last_stall:
         STORE.set(stall=stall)
         LOG.info("Stall: %s", stall)
@@ -360,15 +364,26 @@ def run_service():
 
 
 def main():
+    global _lakebase
+    app_dir = MODEL_DIR.parent
+    _lakebase = LakebaseIntegration.load(
+        app_dir / "lakebase.json", app_dir / ".cache" / "lakebase-occupancy.json", STORE, LOG
+    )
     try:
-        start_web_server(STORE, LOG, debug_report=DEBUG_REPORT)
+        start_web_server(STORE, LOG, debug_report=DEBUG_REPORT, lakebase=_lakebase)
     except OSError:
         LOG.exception("Could not bind dashboard to port 5001")
     LOG.info("ParkSight starting; Linux NetworkManager manages the Wi-Fi hotspot")
     LOG.info("Models directory: %s", MODEL_DIR)
     get_models()  # Log ONNX Runtime/model readiness at startup without crashing.
     LOG.info("Web dashboard remains available while the camera is disconnected")
-    App.run(run_service)
+    if _lakebase is not None:
+        _lakebase.sync.start()
+    try:
+        App.run(run_service)
+    finally:
+        if _lakebase is not None:
+            _lakebase.sync.stop()
 
 
 if __name__ == "__main__":

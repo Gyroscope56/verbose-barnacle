@@ -12,3 +12,26 @@ The App Lab app uses the Brio camera for 720p plate recognition and the Modulino
 6. Start the app from App Lab or run `TMPDIR=/tmp arduino-app-cli app start user:parksight-camera-starter` on the board. Set it as the default app to enable startup on boot.
 
 Dashboard and debug images are served over local HTTP. Use the dashboard on a trusted network. The offline app does not require a cloud connection. The board's clock supplies report timestamps.
+
+## Connect garage and occupancy to Lakebase
+
+1. On the development computer, run `bash app/uno-q/setup/bundle-lakebase.sh` from the repository root. It copies the shared CLI backend into the App Lab package. Pass the path to a staging app directory to bundle there instead.
+2. Download the Lakebase driver wheels on an internet-connected computer. From the repo root, run:
+
+   ```sh
+   python3 -m pip download --only-binary=:all: \
+     --platform manylinux_2_28_aarch64 --platform manylinux2014_aarch64 \
+     --python-version 3.13 --implementation cp --abi cp313 \
+     -r app/uno-q/lakebase-requirements.txt -d app/uno-q/python-libraries
+   ```
+
+   Transfer the prepared app and wheels together. Leave ONNX Runtime's existing files in place.
+3. On the board, copy `lakebase.example.json` to `lakebase.json`, set its mode to `0600`, and fill in a reserved spot ID, a URL-safe operator token, and test database details. Verify the container can reach Lakebase over the upstream network before setting `enabled` to `true` and restarting. An isolated hotspot has no Lakebase route on its own. Keep the app's HTTP port on a trusted network, since the operator token travels over local HTTP.
+4. Use the **Garage** panel to check or submit an explicit action. Camera reads prefill the number. Enter the exact key used in Lakebase, including any required state prefix and punctuation. For a connection loss during a write, use **Check** before retrying. Garage actions are never queued offline.
+5. Known sensor states sync to the configured spot in the background. Only the latest pending state is kept during an outage, and the worker waits for a fresh known reading on restart. An unavailable sensor leaves the database's occupancy unchanged. An occupied spot refreshes its duration about every 30 seconds while connected. The database clock records the time a state is applied.
+
+The test schema expects a unique value in `g_sessions.license_plate` and one `parking_spots` row per `floor_zone_number`. Verify those constraints and the canonical plate-key format on the intended Lakebase database before enabling writes. The integration does not alter the schema.
+
+Run local checks from the repository root with `python -m unittest discover -s app/tests -v`. Supply `PARKSIGHT_TEST_POSTGRES` for the tests that create and drop a disposable PostgreSQL schema.
+
+The [camera setup plan](docs/camera-setup-plan.md) covers the future installed-camera snapshot, divider editor, and entry/exit zones.

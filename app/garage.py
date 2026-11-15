@@ -1,145 +1,118 @@
-import os
+"""Transactional garage operations, shared by the CLI and the UNO Q."""
+
 import argparse
-import psycopg
+from dataclasses import dataclass
 
-DB_HOST = os.environ.get(
-    "PARKING_DB_HOST",
-    "ep-spring-lake-d8d06cdv.database.us-east-2.cloud.databricks.com",
-)
-DB_USER = "app_user"
-DB_NAME = "databricks_postgres"
-DB_PASSWORD = os.environ.get("PARKING_DB_PASSWORD")
+if __package__:
+    from .lakebase import connect
+else:
+    from lakebase import connect
 
 
-def get_database_url():
-    if not DB_PASSWORD:
-        raise RuntimeError(
-            "PARKING_DB_PASSWORD is not set. "
-            "Get it from the Lakebase console's Reset password option for app_user."
-        )
-    return (
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
-        "?sslmode=require"
-    )
+@dataclass(frozen=True)
+class GarageResult:
+    status: str
+    message: str
 
 
 def fetch_open_session(cur, license_plate):
-    """Return (has_entrance_ticket, time_in, time_out) or None. Locks the row."""
-    cur.execute("""
-        SELECT has_entrance_ticket, time_in, time_out
+    cur.execute(
+        """
+        SELECT has_entrance_ticket, time_in
         FROM g_sessions
         WHERE license_plate = %s
-        FOR UPDATE;
-    """, (license_plate,))
+        FOR UPDATE
+        """,
+        (license_plate,),
+    )
     return cur.fetchone()
 
 
-def book(license_plate):
-    """Plate is outside: create a session row granting entry permission."""
-    with psycopg.connect(get_database_url()) as conn:
-        with conn.cursor() as cur:
-            row = fetch_open_session(cur, license_plate)
-            if row is not None:
-                raise ValueError(
-                    f"{license_plate} already has an open session row "
-                    "(inside or already booked)."
-                )
-            cur.execute("""
-                INSERT INTO g_sessions
-                    (license_plate, has_entrance_ticket, time_in, time_out)
-                VALUES (%s, TRUE, NULL, NULL);
-            """, (license_plate,))
-    print(f"{license_plate}: booked. May enter.")
-
-
-def enter(license_plate):
-    """Plate enters the garage: flip flag to false, stamp time_in."""
-    with psycopg.connect(get_database_url()) as conn:
-        with conn.cursor() as cur:
-            row = fetch_open_session(cur, license_plate)
-            if row is None:
-                raise ValueError(f"{license_plate} has no session row.")
-            has_ticket, time_in, _ = row
-            if time_in is not None:
-                raise ValueError(f"{license_plate} is already inside.")
-            if not has_ticket:
-                raise ValueError(
-                    f"{license_plate} has no entry permission (flag is false)."
-                )
-            cur.execute("""
-                UPDATE g_sessions
-                SET has_entrance_ticket = FALSE, time_in = NOW()
-                WHERE license_plate = %s;
-            """, (license_plate,))
-    print(f"{license_plate}: entered at {time_in or 'now'}.")
-
-
-def exit_garage(license_plate):
-    """Plate leaves: stamp time_out, copy row (as-is, flag=false) to
-    history, delete from sessions. All in one transaction."""
-    with psycopg.connect(get_database_url()) as conn:
-        with conn.cursor() as cur:
-            row = fetch_open_session(cur, license_plate)
-            if row is None:
-                raise ValueError(f"{license_plate} has no session row.")
-            has_ticket, time_in, _ = row
-            if time_in is None:
-                raise ValueError(
-                    f"{license_plate} never entered — use 'cancel' instead."
-                )
-            cur.execute("""
-                UPDATE g_sessions
-                SET time_out = NOW()
-                WHERE license_plate = %s;
-            """, (license_plate,))
-            # Copy the finished visit verbatim (flag stays false)
-            cur.execute("""
-                INSERT INTO garage_visit_history
-                    (license_plate, has_entrance_ticket, time_in, time_out)
-                SELECT license_plate, has_entrance_ticket, time_in, time_out
-                FROM g_sessions
-                WHERE license_plate = %s;
-            """, (license_plate,))
-            cur.execute("""
-                DELETE FROM g_sessions
-                WHERE license_plate = %s;
-            """, (license_plate,))
-    print(f"{license_plate}: exited. Visit archived, session row removed.")
-
-
-def cancel(license_plate):
-    """Remove a booked-but-never-entered row (no history copy)."""
-    with psycopg.connect(get_database_url()) as conn:
-        with conn.cursor() as cur:
-            row = fetch_open_session(cur, license_plate)
-            if row is None:
-                raise ValueError(f"{license_plate} has no session row.")
-            if row[1] is not None:
-                raise ValueError(
-                    f"{license_plate} is inside — must exit, not cancel."
-                )
-            cur.execute(
-                "DELETE FROM g_sessions WHERE license_plate = %s;",
-                (license_plate,),
-            )
-    print(f"{license_plate}: booking cancelled.")
-
-
-def check(license_plate):
-    """Report live enter-eligibility for a plate."""
-    with psycopg.connect(get_database_url()) as conn:
-        with conn.cursor() as cur:
-            row = fetch_open_session(cur, license_plate)
+def check(license_plate, *, connection=connect):
+    with connection() as conn, conn.cursor() as cur:
+        row = fetch_open_session(cur, license_plate)
     if row is None:
-        print(f"{license_plate}: no open row — may enter (needs a booking first).")
-    else:
-        has_ticket, time_in, time_out = row
+        return GarageResult("unbooked", "No open booking. Entry requires a booking.")
+    has_ticket, time_in = row
+    if time_in is not None:
+        return GarageResult("inside", f"Inside since {time_in}.")
+    if has_ticket:
+        return GarageResult("booked", "Booked and outside. May enter.")
+    return GarageResult("denied", "No entry permission.")
+
+
+def book(license_plate, *, connection=connect):
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO g_sessions (license_plate, has_entrance_ticket, time_in, time_out)
+            VALUES (%s, TRUE, NULL, NULL)
+            ON CONFLICT (license_plate) DO NOTHING
+            RETURNING license_plate
+            """,
+            (license_plate,),
+        )
+        if cur.fetchone() is None:
+            raise ValueError("Already has an open session.")
+    return GarageResult("booked", "Booked. May enter.")
+
+
+def enter(license_plate, *, connection=connect):
+    with connection() as conn, conn.cursor() as cur:
+        row = fetch_open_session(cur, license_plate)
+        if row is None:
+            raise ValueError("Entry requires an open booking.")
+        has_ticket, time_in = row
         if time_in is not None:
-            print(f"{license_plate}: INSIDE (entered {time_in}). Cannot re-enter.")
-        elif has_ticket:
-            print(f"{license_plate}: booked, outside. May enter.")
-        else:
-            print(f"{license_plate}: no entry permission.")
+            raise ValueError("Already inside.")
+        if not has_ticket:
+            raise ValueError("No entry permission.")
+        cur.execute(
+            """
+            UPDATE g_sessions
+            SET has_entrance_ticket = FALSE, time_in = NOW()
+            WHERE license_plate = %s RETURNING time_in
+            """,
+            (license_plate,),
+        )
+        (time_in,) = cur.fetchone()
+    return GarageResult("inside", f"Entered at {time_in}.")
+
+
+def exit_garage(license_plate, *, connection=connect):
+    with connection() as conn, conn.cursor() as cur:
+        row = fetch_open_session(cur, license_plate)
+        if row is None:
+            raise ValueError("No open session.")
+        if row[1] is None:
+            raise ValueError("Vehicle never entered. Cancel the booking instead.")
+
+        cur.execute(
+            "UPDATE g_sessions SET time_out = NOW() WHERE license_plate = %s",
+            (license_plate,),
+        )
+        cur.execute(
+            """
+            INSERT INTO garage_visit_history
+                (license_plate, has_entrance_ticket, time_in, time_out)
+            SELECT license_plate, has_entrance_ticket, time_in, time_out
+            FROM g_sessions WHERE license_plate = %s
+            """,
+            (license_plate,),
+        )
+        cur.execute("DELETE FROM g_sessions WHERE license_plate = %s", (license_plate,))
+    return GarageResult("exited", "Exited. Visit archived.")
+
+
+def cancel(license_plate, *, connection=connect):
+    with connection() as conn, conn.cursor() as cur:
+        row = fetch_open_session(cur, license_plate)
+        if row is None:
+            raise ValueError("No open booking.")
+        if row[1] is not None:
+            raise ValueError("Vehicle is inside. Record an exit instead.")
+        cur.execute("DELETE FROM g_sessions WHERE license_plate = %s", (license_plate,))
+    return GarageResult("cancelled", "Booking cancelled.")
 
 
 COMMANDS = {
@@ -152,16 +125,15 @@ COMMANDS = {
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Garage session lifecycle: book / enter / exit."
-    )
-    parser.add_argument("command", choices=COMMANDS.keys())
-    parser.add_argument("license_plate", type=str, help="e.g. WI-ABC-1234")
+    parser = argparse.ArgumentParser(description="Manage a garage session.")
+    parser.add_argument("command", choices=COMMANDS)
+    parser.add_argument("license_plate", help="Existing Lakebase plate key, e.g. WI-ABC-1234")
     args = parser.parse_args()
     try:
-        COMMANDS[args.command](args.license_plate)
-    except ValueError as e:
-        print(f"Rejected: {e}")
+        result = COMMANDS[args.command](args.license_plate)
+    except ValueError as error:
+        parser.exit(1, f"Rejected: {error}\n")
+    print(f"{args.license_plate}: {result.message}")
 
 
 if __name__ == "__main__":

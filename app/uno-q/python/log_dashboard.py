@@ -33,6 +33,12 @@ small, .muted { color:var(--muted) } .pill { padding:5px 12px; border-radius:20p
 .metric {padding:15px 18px}.metric span { display:block; color:var(--muted); font-size:13px; margin-bottom:5px }.metric strong { font-size:23px; overflow-wrap:anywhere }
 .panel { overflow:hidden }.toolbar {display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:15px 17px; border-bottom:1px solid var(--border)}
 .toolbar h2 {margin:0; font-size:18px} .actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px }
+#garage {margin-bottom:22px}
+#garage-form {padding:15px 17px; display:grid; gap:12px}
+#garage-form[hidden] {display:none}
+#garage-form label { display:grid; gap:4px; min-width: min(100%, 220px) }
+#garage-form input {font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:6px}
+#garage-result { margin:0; min-height:1.5em }
 button {color:var(--text); background:#264354; border:1px solid #426679; border-radius:8px; padding:7px 11px; cursor:pointer}
 button:hover {background:#345669}.switch {cursor:pointer; color:var(--muted); font-size:13px}
 pre {font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; padding:13px 17px; min-height:280px; max-height:58vh; overflow:auto}
@@ -50,6 +56,22 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
 <div class="metric"><span>OCR attempts</span><strong id="ocr">0</strong></div>
 <div class="metric"><span>Uptime</span><strong id="uptime">—</strong></div>
 </section>
+<section id="garage" class="panel" hidden>
+<div class="toolbar"><h2>Garage</h2><span id="lakebase-sync" class="muted">Connecting…</span></div>
+<form id="garage-form" autocomplete="off">
+<div class="actions">
+<label>Lakebase plate key <input id="garage-key" maxlength="32" required
+ autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+<label>Operator token <input id="garage-token" type="password" required
+ maxlength="128" autocomplete="off"></label>
+</div>
+<div class="actions">
+<button type="submit" value="check">Check</button><button type="submit" value="book">Book</button>
+<button type="submit" value="enter">Enter</button><button type="submit" value="exit">Exit</button>
+<button type="submit" value="cancel">Cancel booking</button>
+</div>
+<p id="garage-result" role="status"></p>
+</form></section>
 <section class="panel"><div class="toolbar"><h2>Live application logs</h2><div class="actions">
 <label class="switch"><input type="checkbox" id="autoscroll" checked> Auto-scroll</label>
 <a href="/recognition-debug" target="_blank" rel="noopener" style="color:var(--text)">Latest recognition debug</a>
@@ -60,6 +82,7 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
 (() => {
  const $ = id => document.getElementById(id);
  const log = $('logs'); let last = 0; let lines = []; let connected = false;
+ let prefilledPlate = null;
  const fmt = n => String(n).padStart(2,'0');
  const formatTime = iso => { const d = new Date(iso); return `${fmt(d.getHours())}:${fmt(d.getMinutes())}:${fmt(d.getSeconds())}`; };
  function render() { log.textContent = lines.join('\n') || 'No logs yet'; if ($('autoscroll').checked) log.scrollTop=log.scrollHeight; }
@@ -77,9 +100,40 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
    $('plate-state').textContent=data.status.last_plate ? data.status.last_plate_state || 'Unknown' : '—';
    $('motion').textContent=data.status.motion_events;
    $('ocr').textContent=data.status.ocr_attempts; $('uptime').textContent=seconds(data.status.uptime_seconds);
+   $('garage').hidden = !data.status.lakebase_enabled && data.status.lakebase_sync === 'Disabled';
+   $('garage-form').hidden = !data.status.lakebase_enabled;
+   const spot = data.status.lakebase_spot;
+   $('lakebase-sync').textContent = spot ? spot + ' · ' + data.status.lakebase_sync : data.status.lakebase_sync;
+   if(data.status.last_plate && data.status.last_plate !== prefilledPlate &&
+      document.activeElement !== $('garage-key')){
+     $('garage-key').value = data.status.last_plate;
+     prefilledPlate = data.status.last_plate;
+   }
    $('connection').textContent='Live · Connected'; connected=true;
   }catch(e){$('connection').textContent='Disconnected';connected=false; }
  }
+ $('garage-form').onsubmit=async event=>{
+   event.preventDefault();
+   const action=event.submitter?.value || 'check';
+   const key=$('garage-key').value.trim();
+   const buttons=$('garage-form').querySelectorAll('button');
+   buttons.forEach(button=>button.disabled=true);
+   $('garage-result').textContent='Working…';
+   try {
+     const response=await fetch('/api/garage', {
+       method:'POST',
+       headers:{'Content-Type':'application/json', 'X-ParkSight-Token':$('garage-token').value},
+       body:JSON.stringify({action, plate_key:key})
+     });
+     const result=await response.json();
+     $('garage-result').textContent=key+' · '+result.message;
+   } catch {
+     $('garage-result').textContent=action === 'check' ? 'Could not check the plate.' :
+       'Write outcome unknown. Check the plate before retrying.';
+   } finally {
+     buttons.forEach(button=>button.disabled=false);
+   }
+ };
  $('download').onclick=()=>{const blob=new Blob([lines.join('\n')+'\n'],{type:'text/plain'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='parksight-logs.txt';a.click();URL.revokeObjectURL(u);};
  $('clear').onclick=()=>{lines=[];render();};
  poll();setInterval(poll,1000);
@@ -96,6 +150,7 @@ class LiveLogStore:
         self._status = {
             "stall": "unknown", "camera": "starting", "last_plate": None, "last_plate_state": None,
             "motion_events": 0, "ocr_attempts": 0, "plate_reads": 0,
+            "lakebase_enabled": False, "lakebase_spot": None, "lakebase_sync": "Disabled",
         }
 
     def add(self, record):
@@ -156,8 +211,34 @@ def configure_logging(store):
     return logger
 
 
-def start_web_server(store, log, address="0.0.0.0", port=5001, *, debug_report):
+def start_web_server(store, log, address="0.0.0.0", port=5001, *, debug_report, lakebase=None):
     class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if urlsplit(self.path).path != "/api/garage":
+                self.send_error(404, "Not Found")
+                return
+            if lakebase is None:
+                self.send_json(503, {"message": "Lakebase integration is disabled."})
+                return
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                if not 0 < size <= 4096 or self.headers.get_content_type() != "application/json":
+                    raise ValueError("Invalid request")
+                self.connection.settimeout(5)
+                data = json.loads(self.rfile.read(size))
+                if not isinstance(data, dict):
+                    raise ValueError("Expected a request object")
+            except (ValueError, OSError):
+                self.send_json(400, {"message": "Invalid garage request."})
+                return
+            status, result = lakebase.garage(
+                self.headers.get("X-ParkSight-Token", ""), data.get("action"), data.get("plate_key")
+            )
+            self.send_json(status, result)
+
+        def send_json(self, status, value):
+            self.send_payload(status, json.dumps(value).encode("utf-8"), "application/json; charset=utf-8")
+
         def do_GET(self):
             parsed = urlsplit(self.path)
             if parsed.path == "/":
@@ -187,7 +268,10 @@ def start_web_server(store, log, address="0.0.0.0", port=5001, *, debug_report):
             else:
                 self.send_error(404, "Not Found")
                 return
-            self.send_response(200)
+            self.send_payload(200, payload, content_type)
+
+        def send_payload(self, status, payload, content_type):
+            self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")

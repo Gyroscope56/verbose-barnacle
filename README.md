@@ -7,3 +7,7 @@ Intelligent parking management for MadHacks using Arduino UNO Q, local license p
 The [synthetic LPR package](ml/lpr/README.md) generates annotated U.S.-style plate images, trains a plate detector and compact text recognizer, and reports validation/test accuracy and inference latency.
 
 Source and tests are versioned; datasets, weights, and local run artifacts stay outside Git.
+
+## Arduino app and garage integration
+
+The [UNO Q app](app/uno-q/README.md) runs the local camera, sensors, and dashboard. It can optionally use the shared garage and parking-space operations in `app/` to update Lakebase.
