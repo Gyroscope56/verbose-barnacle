@@ -401,17 +401,15 @@ svg rect, svg line {
 }
 
 svg .entry {
-  fill: rgba(9, 76, 178, 0.14);
-  stroke: var(--primary);
-  stroke-width: 2.25;
-  stroke-dasharray: 6 3;
+  fill: rgba(91, 230, 160, 0.16);
+  stroke: #5be6a0;
+  stroke-width: 2.5;
 }
 
 svg .exit {
-  fill: rgba(90, 95, 99, 0.16);
-  stroke: var(--secondary);
-  stroke-width: 2.25;
-  stroke-dasharray: 6 3;
+  fill: rgba(255, 194, 101, 0.16);
+  stroke: #ffc265;
+  stroke-width: 2.5;
 }
 
 .camera-footer {
@@ -532,13 +530,13 @@ svg .exit {
 }
 
 .tool-swatch.entry {
-  color: var(--primary);
-  background-color: rgba(9, 76, 178, 0.2);
+  color: #1f9d66;
+  background-color: rgba(91, 230, 160, 0.3);
 }
 
 .tool-swatch.exit {
-  color: var(--secondary);
-  background-color: rgba(90, 95, 99, 0.2);
+  color: #c98a1e;
+  background-color: rgba(255, 194, 101, 0.35);
 }
 
 .tool-shortcut {
