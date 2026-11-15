@@ -43,7 +43,7 @@ class Calibration(BaseModel):
 
 class GarageRead(BaseModel):
     id: UUID
-    zone: Literal["entry", "exit"]
+    zone: Literal["entry", "exit", "auto"]
     plate: str = Field(pattern=r"^[A-Z0-9]{5,8}$")
 
 

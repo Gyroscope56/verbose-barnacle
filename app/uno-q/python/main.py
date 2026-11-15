@@ -241,7 +241,9 @@ def recognize_burst(frames, zone=None, region=None, garage_enabled=False, *, man
                 STORE.increment("plate_reads")
                 STORE.set(last_plate=plate, last_plate_state=state)
                 if garage_enabled and _camera_setup is not None:
-                    _camera_setup.enqueue_garage_read(zone, plate)
+                    # Manual runs have no motion zone; the API picks entry or exit
+                    # from whether this plate is currently inside.
+                    _camera_setup.enqueue_garage_read(zone or "auto", plate)
                 decision = (f"Confirmed {plate} on {count} of {len(frames)} frames. "
                             f"Issuing state guess: {state or 'Unknown'}")
         LOG.info("%s", decision)
@@ -358,7 +360,8 @@ def run_camera(camera, worker):
                 )
                 if manual is not None:
                     manual_id, frames = manual
-                    worker.submit(recognize_burst, frames, manual_id=manual_id)
+                    worker.submit(recognize_burst, frames, garage_enabled=True,
+                                  manual_id=manual_id)
             if ocr_job is not None and ocr_job.done():
                 ocr_job.result()
                 ocr_job = None

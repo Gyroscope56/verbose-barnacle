@@ -15,8 +15,9 @@ MO MS MT NC ND NE NH NJ NM NV NY OH OK OR PA RI SC SD TN TX UT VA VT WA WI WV WY
 """.split()
 
 
-def apply_read(conn, zone, plate):
-    sessions = conn.execute(
+def find_sessions(conn, plate):
+    """Lock and return at most two garage sessions matching a normalized plate."""
+    return conn.execute(
         """SELECT license_plate, has_entrance_ticket, time_in
            FROM g_sessions
            WHERE regexp_replace(upper(license_plate), '[^A-Z0-9]', '', 'g') = %s
@@ -27,6 +28,16 @@ def apply_read(conn, zone, plate):
            ORDER BY license_plate LIMIT 2 FOR UPDATE""",
         (plate, STATE_PREFIXES, plate),
     ).fetchall()
+
+
+def resolve_zone(sessions, zone):
+    """Manual operator runs send "auto": exit when the plate is inside, else entry."""
+    if zone != "auto":
+        return zone
+    return "exit" if len(sessions) == 1 and sessions[0][2] is not None else "entry"
+
+
+def apply_read(conn, zone, plate, sessions):
     if len(sessions) > 1:
         return "ambiguous"
     if not sessions:
@@ -46,6 +57,10 @@ def apply_read(conn, zone, plate):
 
 
 def record_read(conn, camera_id, event_id, zone, plate):
+    # Lock the matching sessions first so "auto" is resolved before the event is
+    # stored; the API role may update only the event's outcome afterwards.
+    sessions = find_sessions(conn, plate)
+    zone = resolve_zone(sessions, zone)
     created = conn.execute(
         """INSERT INTO parksight_garage_events (camera_id, event_id, zone, plate, outcome)
            VALUES (%s, %s, %s, %s, 'pending')
@@ -61,7 +76,7 @@ def record_read(conn, camera_id, event_id, zone, plate):
         ).fetchone()
         return {"outcome": outcome}
 
-    outcome = apply_read(conn, zone, plate)
+    outcome = apply_read(conn, zone, plate, sessions)
     conn.execute(
         """UPDATE parksight_garage_events SET outcome = %s
            WHERE camera_id = %s AND event_id = %s""",
