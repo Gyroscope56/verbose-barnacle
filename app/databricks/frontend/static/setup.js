@@ -148,6 +148,16 @@ for (const button of tools) {
     $("hint").textContent = hints[active];
   };
 }
+
+window.addEventListener("keydown", (event) => {
+  if (drawing || event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") return;
+  const toolMap = {"1": "divider", "2": "entry", "3": "exit"};
+  if (toolMap[event.key]) {
+    const targetTool = toolMap[event.key];
+    const button = tools.find(b => b.dataset.tool === targetTool);
+    if (button) button.click();
+  }
+});
 $("reverse").onclick = () => { layout.reverse = !layout.reverse; render(); };
 $("reset").onclick = () => { layout = {}; message("Drawing cleared. Save a new layout to replace the stored one."); render(); };
 

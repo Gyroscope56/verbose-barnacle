@@ -3,32 +3,75 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ParkSight · Camera setup</title>
+  <title>ParkSight · Camera Calibration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Noto+Serif:ital,wght@0,400;0,600;1,400&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/setup.js" defer></script>
 </head>
 <body>
-  <header class="masthead"><div class="brand">Park<span>Sight</span></div><a href="/api-check">Check API connection</a></header>
+  <header class="masthead">
+    <div class="brand-group">
+      <div class="brand">Park<span>Sight</span></div>
+      <span class="system-tag">Optical Calibration</span>
+    </div>
+    <nav class="masthead-nav">
+      <a href="/api-check" class="api-link" title="Verify Databricks App bridge connectivity">
+        <span class="status-pip" aria-hidden="true"></span>
+        <span>Check API connection</span>
+      </a>
+    </nav>
+  </header>
+
   <main>
     <header class="intro">
-      <div>
-        <h1>Camera setup</h1>
-        <p>Capture the installed view, then mark the divider and the entry and exit detection zones.</p>
+      <div class="intro-heading">
+        <h1>Camera calibration</h1>
+        <p class="lead">Capture the installed field of view, then demarcate the lane divider and directional detection zones.</p>
       </div>
-      <button id="capture" class="primary">Capture reference frame</button>
+      <button id="capture" class="primary" type="button">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+          <circle cx="8" cy="8" r="3"/>
+          <path d="M2.5 5.5V3.5C2.5 2.95 2.95 2.5 3.5 2.5H5.5M10.5 2.5H12.5C13.05 2.5 13.5 2.95 13.5 3.5V5.5M13.5 10.5V12.5C13.5 13.05 13.05 13.5 12.5 13.5H10.5M5.5 13.5H3.5C2.95 13.5 2.5 13.05 2.5 12.5V10.5"/>
+        </svg>
+        <span>Capture reference frame</span>
+      </button>
     </header>
+
     <div class="workspace">
-      <section class="camera-panel" aria-label="Reference image">
-        <div class="camera-bar"><strong>Reference view</strong><span id="resolution">No image</span></div>
-        <div id="empty" class="empty">The latest reference frame will appear here.</div>
+      <section class="camera-panel" aria-label="Reference image viewport">
+        <div class="camera-bar">
+          <div class="bar-title">
+            <span class="indicator-dot" aria-hidden="true"></span>
+            <strong>Reference Viewport</strong>
+          </div>
+          <div class="bar-meta">
+            <span class="meta-caption">Resolution</span>
+            <span id="resolution">No image</span>
+          </div>
+        </div>
+
+        <div id="empty" class="empty">
+          <div class="empty-graphic" aria-hidden="true">
+            <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="24" cy="24" r="18" stroke-dasharray="2 3"/>
+              <circle cx="24" cy="24" r="7"/>
+              <path d="M24 10V6M24 42V38M10 24H6M42 24H38"/>
+            </svg>
+          </div>
+          <p class="empty-title">Awaiting Reference Frame</p>
+          <p class="empty-text">Capture the installed camera view from the UNO Q unit to align detection boundaries.</p>
+        </div>
+
         <div id="preview" class="preview" hidden>
-          <img id="reference" alt="Installed camera reference">
+          <img id="reference" alt="Installed camera reference view">
           <svg id="overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" tabindex="0"
                aria-label="Draw the selected shape or move it with the arrow keys">
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
                       markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="#ffe196" stroke-width="1.4"/>
+                <path d="M 0 1.5 L 8 5 L 0 8.5" fill="none" stroke="#bfab49" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
               </marker>
             </defs>
             <rect id="entryShape" class="entry" hidden/>
@@ -37,24 +80,75 @@
             <line id="directionShape" class="direction" marker-end="url(#arrow)" hidden/>
           </svg>
         </div>
+
+        <div class="camera-footer">
+          <span class="hint-inline">Click & drag on viewport to draw &middot; Arrow keys to nudge position &middot; Shift + Arrow for coarse nudge</span>
+        </div>
       </section>
+
       <aside class="controls" aria-label="Calibration tools">
-        <h2>Draw on the image</h2>
-        <div class="tools" id="tools">
-          <button data-tool="divider" aria-pressed="true"><span class="swatch divider"></span> Divider</button>
-          <button data-tool="entry" aria-pressed="false"><span class="swatch entry"></span> Entry zone</button>
-          <button data-tool="exit" aria-pressed="false"><span class="swatch exit"></span> Exit zone</button>
+        <div class="controls-header">
+          <h2>Zone Definition</h2>
+          <span class="controls-badge">Vector Overlay</span>
         </div>
-        <p class="hint" id="hint">Drag from one end of the divider to the other. The arrow shows entry direction.</p>
-        <button id="reverse" class="quiet" disabled>Reverse entry direction</button>
+
+        <div class="tool-section">
+          <label class="section-label">Active Overlay Tool</label>
+          <div class="tools" id="tools">
+            <button data-tool="divider" aria-pressed="true" type="button">
+              <span class="tool-left">
+                <span class="tool-swatch divider" aria-hidden="true"></span>
+                <span class="tool-name">Divider Line</span>
+              </span>
+              <span class="tool-shortcut">1</span>
+            </button>
+            <button data-tool="entry" aria-pressed="false" type="button">
+              <span class="tool-left">
+                <span class="tool-swatch entry" aria-hidden="true"></span>
+                <span class="tool-name">Entry Zone</span>
+              </span>
+              <span class="tool-shortcut">2</span>
+            </button>
+            <button data-tool="exit" aria-pressed="false" type="button">
+              <span class="tool-left">
+                <span class="tool-swatch exit" aria-hidden="true"></span>
+                <span class="tool-name">Exit Zone</span>
+              </span>
+              <span class="tool-shortcut">3</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="guidance-card">
+          <div class="guidance-header">
+            <span class="guidance-label">Instruction</span>
+          </div>
+          <p class="hint" id="hint">Drag from one end of the divider to the other. The arrow shows entry direction.</p>
+        </div>
+
+        <div class="controls-row">
+          <button id="reverse" class="secondary-action" type="button" disabled>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+              <path d="M3 6h7a3 3 0 0 1 3 3v1M6 3L3 6l3 3"/>
+            </svg>
+            <span>Reverse entry direction</span>
+          </button>
+        </div>
+
         <div class="actions">
-          <button id="reset" class="quiet" disabled>Reset drawing</button>
-          <button id="save" class="primary" disabled>Save layout</button>
+          <button id="reset" class="quiet-action" type="button" disabled>Reset drawing</button>
+          <button id="save" class="primary" type="button" disabled>Save layout</button>
         </div>
-        <p class="hint">Saved layouts are for preview. Garage operations still use explicit actions.</p>
+
+        <div class="grounding-note">
+          <p>Saved layouts establish calibration bounds for license plate detection and vehicle velocity verification.</p>
+        </div>
       </aside>
     </div>
-    <p id="status" role="status" aria-live="polite">Loading setup…</p>
+
+    <div class="status-container">
+      <p id="status" role="status" aria-live="polite">Loading setup…</p>
+    </div>
   </main>
 </body>
 </html>
