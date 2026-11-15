@@ -47,7 +47,8 @@ class GarageRead(BaseModel):
     plate: str = Field(pattern=r"^[A-Z0-9]{5,8}$")
 
 
-def camera_setup_router(connect, camera_id, operators, device_key, record_read=None):
+def camera_setup_router(connect, camera_id, operators, device_key, record_read=None,
+                        debug_enabled=False):
     """Connect is the existing backend's PostgreSQL connection factory."""
     if not operators or not device_key:
         raise ValueError("Camera setup requires allowed operators and a device key")
@@ -64,6 +65,15 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
     def require_setup_action(value):
         if value != "1":
             raise HTTPException(403, "Use the camera setup controls to make changes")
+
+    if debug_enabled:
+        if __package__:
+            from .debug_feed import register_debug_routes
+        else:
+            from debug_feed import register_debug_routes
+
+        register_debug_routes(router, connect, camera_id, require_operator, require_device,
+                              require_setup_action, record_read is not None)
 
     def compatible_calibration(calibration, width, height):
         if calibration is not None and width and height:
@@ -167,13 +177,17 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
                    FROM parksight_camera_setup WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone()
-        if row is None:
-            return {"id": None, "calibration": None, "garage_enabled": record_read is not None}
-        request_id, calibration, width, height = row
+            debug_requested = debug_enabled and conn.execute(
+                """SELECT EXISTS (SELECT 1 FROM parksight_camera_debug
+                                  WHERE camera_id = %s AND viewed_until > now())""",
+                (camera_id,),
+            ).fetchone()[0]
+        request_id, calibration, width, height = row or (None, None, None, None)
         return {
             "id": request_id,
             "calibration": compatible_calibration(calibration, width, height),
             "garage_enabled": record_read is not None,
+            "debug_requested": debug_requested,
         }
 
     if record_read is not None:

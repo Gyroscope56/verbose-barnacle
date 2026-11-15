@@ -33,6 +33,7 @@ def install_camera_setup(app):
             operators,
             key,
             record_read,
+            debug_enabled=os.environ.get("PARKSIGHT_DEBUG_ENABLED") == "1",
         )
     )
     return True

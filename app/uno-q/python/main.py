@@ -207,6 +207,7 @@ def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
     detector, ocr = models
     notes = []
     readings = []
+    detections = {}
     decision = "No reliable read"
     started = monotonic()
     try:
@@ -222,6 +223,7 @@ def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
                 notes.append(f"{detection} Rejected because the box covers almost the entire frame.")
                 continue
             reading, details = read_frame(index, frame, box, ocr)
+            detections[index] = {"box": box, "score": score}
             readings.append(reading)
             notes.append(f"{detection} {details}.")
 
@@ -250,11 +252,19 @@ def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
         if frames:
             selected = max(readings, key=lambda reading: reading.quality, default=None)
             index = selected.index if selected else len(frames) - 1
+            elapsed = monotonic() - started
+            ocr_input = selected.ocr_input if selected else None
+            plate_crop = selected.crop if selected else None
+            if _camera_setup is not None:
+                _camera_setup.offer_debug_report({
+                    "frame_number": index + 1, "zone": zone, "elapsed": elapsed,
+                    "threshold": DETECTOR_THRESHOLD, "decision": decision,
+                    "notes": notes, "detection": detections.get(index),
+                }, frames[index], plate_crop, ocr_input)
             try:
                 save_debug_report(
-                    DEBUG_REPORT, frames[index], selected.ocr_input if selected else None,
-                    notes, DETECTOR_THRESHOLD, monotonic() - started, decision=decision,
-                    frame_number=index + 1, plate_crop=selected.crop if selected else None,
+                    DEBUG_REPORT, frames[index], ocr_input, notes, DETECTOR_THRESHOLD, elapsed,
+                    decision=decision, frame_number=index + 1, plate_crop=plate_crop,
                 )
             except (OSError, cv2.error) as exc:
                 LOG.warning("Could not save recognition debug report: %s", exc)

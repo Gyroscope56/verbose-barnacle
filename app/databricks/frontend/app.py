@@ -85,6 +85,23 @@ def create_app(upstream=requests.request):
     def health():
         return {"ok": True}
 
+    @app.get("/debug")
+    def debug_page():
+        access = forward("/api/camera-setup/debug/access")
+        if isinstance(access, tuple) or access.status_code != 200:
+            return access
+        page = app.send_static_file("debug.html")
+        page.headers["Cache-Control"] = "no-store"
+        return page
+
+    @app.post("/api/debug/view")
+    def debug_view():
+        return forward("/api/camera-setup/debug/view")
+
+    @app.get("/api/debug/report")
+    def debug_report():
+        return forward("/api/camera-setup/debug/report")
+
     @app.get("/api-check")
     def api_check():
         return forward("/", probe=True)

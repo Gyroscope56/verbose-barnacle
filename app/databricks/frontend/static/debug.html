@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ParkSight · Camera Debug</title>
+  <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/debug.css">
+  <script src="/static/debug.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand-group"><div class="brand">Park<span>Sight</span></div></div>
+    <nav class="masthead-nav"><a href="/" class="api-link">Camera calibration</a></nav>
+  </header>
+  <main>
+    <header class="intro">
+      <div class="intro-heading"><h1>Camera debug</h1></div>
+      <button class="quiet-action" id="toggle" type="button">Pause preview</button>
+    </header>
+
+    <div class="debug-grid">
+      <section class="camera-panel">
+        <div class="camera-bar">
+          <strong>Live camera</strong>
+          <span id="live-status" role="status">Connecting…</span>
+        </div>
+        <div class="debug-viewport" id="live-view">
+          <p id="live-empty">Waiting for a frame from the UNO Q.</p>
+          <img id="live-frame" alt="Current UNO Q camera view" hidden>
+          <svg id="zones" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" hidden>
+            <rect id="entry-box" class="entry"/>
+            <rect id="exit-box" class="exit"/>
+          </svg>
+        </div>
+        <div class="debug-legend"><span class="entry">Entry zone</span><span class="exit">Exit zone</span></div>
+      </section>
+
+      <aside class="debug-summary">
+        <section aria-labelledby="result-title">
+          <h2 id="result-title">Latest inference</h2>
+          <p id="decision">Waiting for a motion-triggered read.</p>
+          <p class="debug-meta" id="inference-meta"></p>
+        </section>
+        <section aria-labelledby="garage-title">
+          <h2 id="garage-title">Latest garage result</h2>
+          <p id="garage-result">No garage update recorded.</p>
+        </section>
+      </aside>
+    </div>
+
+    <section class="debug-evidence" id="inference" hidden>
+      <h2>Evaluated frame</h2>
+      <div class="debug-evidence-grid">
+        <div class="debug-viewport">
+          <img id="evaluated" alt="Exact frame selected for the inference report">
+          <svg id="detection" preserveAspectRatio="none" aria-hidden="true" hidden><rect/></svg>
+        </div>
+        <div class="debug-crops">
+          <figure><figcaption>Plate crop</figcaption><img id="plate-crop" alt="Plate crop" hidden><p id="crop-empty">No plate crop.</p></figure>
+          <figure><figcaption>OCR input</figcaption><img id="ocr-input" alt="OCR model input" hidden><p id="ocr-empty">No OCR input.</p></figure>
+        </div>
+      </div>
+      <details open><summary>Frame results</summary><ol id="notes"></ol></details>
+    </section>
+  </main>
+</body>
+</html>

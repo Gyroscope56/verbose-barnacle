@@ -98,6 +98,24 @@ class DeviceClient:
             "id": event_id, "zone": zone, "plate": plate,
         }).encode(), headers={"Content-Type": "application/json"}))
 
+    def publish_debug_preview(self, frame):
+        height, width = frame.shape[:2]
+        scale = min(1, 640 / max(width, height))
+        if scale < 1:
+            frame = cv2.resize(frame, (round(width * scale), round(height * scale)),
+                               interpolation=cv2.INTER_AREA)
+        height, width = frame.shape[:2]
+        self.call("/debug/preview", method="PUT", data=jpeg_bytes(frame, 70), headers={
+            "Content-Type": "image/jpeg", "X-Image-Width": str(width), "X-Image-Height": str(height),
+        })
+
+    def publish_debug_report(self, detail, frame, crop, ocr_input):
+        payload = {**detail}
+        for name, image in (("frame", frame), ("crop", crop), ("ocr_input", ocr_input)):
+            payload[name] = b64encode(jpeg_bytes(image, 82)).decode() if image is not None else None
+        self.call("/debug/report", method="PUT", data=json.dumps(payload).encode(),
+                  headers={"Content-Type": "application/json"})
+
     def publish(self, request_id, frame):
         height, width = frame.shape[:2]
         ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
@@ -106,6 +124,13 @@ class DeviceClient:
         self.call(f"/snapshot/{request_id}", method="PUT", data=jpeg.tobytes(), headers={
             "Content-Type": "image/jpeg", "X-Image-Width": str(width), "X-Image-Height": str(height),
         })
+
+
+def jpeg_bytes(frame, quality):
+    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok:
+        raise ValueError("Cannot encode debug JPEG")
+    return jpeg.tobytes()
 
 
 class CameraSetupBridge:
@@ -121,6 +146,12 @@ class CameraSetupBridge:
         self.garage_enabled = False
         self.garage_retry_at = 0.0
         self.garage_queue = layout_path.with_name("garage-outbox.sqlite")
+        self.debug_requested = False
+        self.debug_next_frame = 0.0
+        self.debug_frame = None
+        self.debug_report = None
+        self.debug_sent_report = None
+        self.debug_retry_at = 0.0
         try:
             self.set_calibration(json.loads(layout_path.read_text()), cache=False)
         except FileNotFoundError:
@@ -157,6 +188,31 @@ class CameraSetupBridge:
         with self.lock:
             if self.request_id is not None and self.frame is None:
                 self.frame = frame.copy()
+            if self.debug_requested and monotonic() >= self.debug_next_frame:
+                self.debug_frame = frame.copy()
+                self.debug_next_frame = monotonic() + 0.5
+
+    def offer_debug_report(self, detail, frame, crop, ocr_input):
+        height, width = frame.shape[:2]
+        with self.lock:
+            self.debug_report = ({**detail, "id": str(uuid4()), "height": height, "width": width},
+                                 frame, crop, ocr_input)
+
+    def sync_debug(self):
+        if not self.debug_requested or monotonic() < self.debug_retry_at:
+            return
+        with self.lock:
+            frame, self.debug_frame = self.debug_frame, None
+            report = self.debug_report
+        try:
+            if frame is not None:
+                self.client.publish_debug_preview(frame)
+            if report is not None and report[0]["id"] != self.debug_sent_report:
+                self.client.publish_debug_report(*report)
+                self.debug_sent_report = report[0]["id"]
+        except (URLError, OSError, ValueError, cv2.error):
+            self.debug_retry_at = monotonic() + 3
+            self.log.warning("Camera debug upload unavailable")
 
     def regions(self, width, height):
         with self.lock:
@@ -225,6 +281,9 @@ class CameraSetupBridge:
             except (ValueError, TypeError, KeyError, OverflowError):
                 self.log.warning("Ignoring an invalid camera layout from the API")
         with self.lock:
+            self.debug_requested = state.get("debug_requested") is True
+            if not self.debug_requested:
+                self.debug_frame = None
             if request_id != self.request_id:
                 self.request_id = request_id
                 self.frame = None
@@ -242,9 +301,13 @@ class CameraSetupBridge:
             try:
                 self.poll()
                 self.sync_garage_read()
-                wait = 1
+                self.sync_debug()
+                wait = 0.5 if self.debug_requested else 1
             except (URLError, OSError, ValueError, KeyError, TypeError, cv2.error) as error:
-                if wait == 1:
+                if wait != 5:
                     self.log.warning("Camera setup API unavailable (%s)", type(error).__name__)
+                with self.lock:
+                    self.debug_requested = False
+                    self.debug_frame = None
                 wait = 5
             self.stop_event.wait(wait)

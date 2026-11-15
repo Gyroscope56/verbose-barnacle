@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from base64 import b64decode, b64encode
 from os import environ
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -108,6 +109,7 @@ class CaptureTest(unittest.TestCase):
         with self.connect() as conn:
             conn.execute((ROOT / "app/databricks/api/schema.sql").read_text())
             conn.execute((ROOT / "app/databricks/api/garage_schema.sql").read_text())
+            conn.execute((ROOT / "app/databricks/api/debug_schema.sql").read_text())
             conn.execute("""
                 CREATE TABLE g_sessions (
                     license_plate text PRIMARY KEY, has_entrance_ticket boolean NOT NULL,
@@ -131,7 +133,8 @@ class CaptureTest(unittest.TestCase):
         app = FastAPI()
         app.include_router(
             camera_setup_router(
-                self.connect, "entrance-camera", {"operator"}, "device-key", record_read
+                self.connect, "entrance-camera", {"operator"}, "device-key", record_read,
+                debug_enabled=True,
             )
         )
         return TestClient(app)
@@ -303,6 +306,44 @@ class CaptureTest(unittest.TestCase):
         entry["id"] = str(uuid4())
         self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
                          {"outcome": "ambiguous"})
+
+    def test_debug_feed_requires_operator_and_active_view(self):
+        base = "/api/camera-setup"
+        view = base + "/debug/view"
+        report = base + "/debug/report"
+        device_report = base + "/device/debug/report"
+        preview = base + "/device/debug/preview"
+        frame = np.zeros((120, 160, 3), np.uint8)
+        valid, encoded = cv2.imencode(".jpg", frame)
+        self.assertTrue(valid)
+        jpeg = encoded.tobytes()
+        payload = {
+            "id": str(uuid4()), "width": 160, "height": 120, "frame_number": 2,
+            "zone": "entry", "elapsed": .3, "threshold": .35, "decision": "No reliable read",
+            "notes": ["No box"], "detection": None, "frame": b64encode(jpeg).decode(),
+            "crop": None, "ocr_input": None,
+        }
+        self.assertEqual(self.api.post(view, headers=DEVICE).status_code, 403)
+        self.assertEqual(self.api.get(report).status_code, 403)
+        self.assertEqual(self.api.put(device_report, json=payload).status_code, 403)
+        self.assertEqual(self.api.put(device_report, headers=DEVICE, json=payload).status_code, 409)
+        self.assertFalse(self.api.get(base + "/device/request", headers=DEVICE).json()["debug_requested"])
+        self.assertIsNone(self.api.post(view, headers=OPERATOR).json()["preview"])
+        self.assertTrue(self.api.get(base + "/device/request", headers=DEVICE).json()["debug_requested"])
+        self.assertEqual(self.api.put(preview, content=jpeg, headers={
+            **DEVICE, "Content-Type": "image/jpeg", "X-Image-Width": "160", "X-Image-Height": "120",
+        }).status_code, 204)
+        self.assertEqual(self.api.put(device_report, headers=DEVICE, json=payload).status_code, 204)
+        state = self.api.post(view, headers=OPERATOR).json()
+        self.assertEqual(b64decode(state["preview"]), jpeg)
+        self.assertEqual(state["report_id"], payload["id"])
+        self.assertEqual(self.api.get(report, headers=OPERATOR).json()["report"], payload)
+        with self.connect() as conn:
+            conn.execute("""UPDATE parksight_camera_debug
+                             SET viewed_until = now() - interval '11 seconds',
+                                 preview_at = now() - interval '11 seconds'""")
+        self.assertFalse(self.api.get(base + "/device/request", headers=DEVICE).json()["debug_requested"])
+        self.assertIsNone(self.api.post(view, headers=OPERATOR).json()["preview"])
 
     def test_queue_retries_with_same_event_id_after_restart(self):
         with TemporaryDirectory() as directory:
