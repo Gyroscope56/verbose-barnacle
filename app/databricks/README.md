@@ -2,7 +2,7 @@
 
 The UNO Q still owns the camera. The Databricks frontend requests a reference through `my-web-api`. An opt-in worker on the UNO Q polls that API over HTTPS and returns a fresh JPEG from the existing camera loop. Operators draw a divider and two zones in the frontend and save normalized coordinates through the API. Lakebase stores one reference image and the calibration for the configured camera.
 
-This version saves and previews the layout. It does not use the zones for motion detection or generate garage events.
+The UNO Q uses the saved entry and exit boxes for motion and plate detection and caches the latest compatible layout for offline use. The divider and its direction are saved for future crossing detection. Zones do not generate garage events.
 
 ## Deploy the setup code
 

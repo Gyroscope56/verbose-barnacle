@@ -26,6 +26,27 @@ def https_origin(url, suffix):
     return url.rstrip("/")
 
 
+def detection_regions(layout, width, height):
+    """Return named pixel rectangles for a saved layout at a compatible aspect ratio."""
+    if layout is None:
+        return ()
+    reference_width, reference_height = layout["image_size"]
+    if layout["version"] != 1 or reference_width <= 0 or reference_height <= 0:
+        raise ValueError("Invalid camera layout metadata")
+    regions = []
+    for name in ("entry", "exit"):
+        zone = layout[name]
+        left, top = zone["x"], zone["y"]
+        right, bottom = left + zone["width"], top + zone["height"]
+        if not (0 <= left < right <= 1.000001 and 0 <= top < bottom <= 1.000001):
+            raise ValueError("Invalid camera detection zone")
+        x = min(width - 1, round(left * width))
+        y = min(height - 1, round(top * height))
+        regions.append((name, (x, y, max(x + 1, min(width, round(right * width))),
+                               max(y + 1, min(height, round(bottom * height))))))
+    return tuple(regions) if reference_width * height == width * reference_height else ()
+
+
 class DeviceClient:
     def __init__(self, workspace_url, api_url, client_id, client_secret, device_key):
         workspace = https_origin(workspace_url, ".cloud.databricks.com")
@@ -66,9 +87,8 @@ class DeviceClient:
                 self.token = None
             raise
 
-    def pending(self):
-        value = json.loads(self.call("/request"))["id"]
-        return UUID(value) if value else None
+    def setup_state(self):
+        return json.loads(self.call("/request"))
 
     def publish(self, request_id, frame):
         height, width = frame.shape[:2]
@@ -81,13 +101,21 @@ class DeviceClient:
 
 
 class CameraSetupBridge:
-    def __init__(self, client, log):
+    def __init__(self, client, log, layout_path):
         self.client = client
         self.log = log
         self.stop_event = Event()
         self.lock = Lock()
         self.request_id = None
         self.frame = None
+        self.layout_path = layout_path
+        self.calibration = None
+        try:
+            self.set_calibration(json.loads(layout_path.read_text()), cache=False)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, TypeError, KeyError, OverflowError):
+            self.log.warning("Could not load the cached camera layout")
 
     @classmethod
     def load(cls, path, log):
@@ -98,7 +126,8 @@ class CameraSetupBridge:
             names = ("workspace_url", "api_url", "client_id", "client_secret", "device_key")
             if any(not isinstance(data.get(name), str) or not data[name] for name in names):
                 raise ValueError("Incomplete camera setup settings")
-            return cls(DeviceClient(*(data[name] for name in names)), log)
+            return cls(DeviceClient(*(data[name] for name in names)), log,
+                       path.parent / ".cache" / "camera-layout.json")
         except FileNotFoundError:
             return None
         except (OSError, ValueError):
@@ -118,8 +147,35 @@ class CameraSetupBridge:
             if self.request_id is not None and self.frame is None:
                 self.frame = frame.copy()
 
+    def regions(self, width, height):
+        with self.lock:
+            layout = self.calibration
+        return detection_regions(layout, width, height)
+
+    def set_calibration(self, layout, *, cache=True):
+        if layout == self.calibration:
+            return
+        if layout is not None:
+            detection_regions(layout, *layout["image_size"])
+        with self.lock:
+            self.calibration = layout
+        if cache:
+            try:
+                self.layout_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.layout_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(layout))
+                temporary.replace(self.layout_path)
+            except OSError:
+                self.log.warning("Could not cache the camera layout")
+
     def poll(self):
-        request_id = self.client.pending()
+        state = self.client.setup_state()
+        request_id = UUID(state["id"]) if state["id"] else None
+        if "calibration" in state:
+            try:
+                self.set_calibration(state["calibration"])
+            except (ValueError, TypeError, KeyError, OverflowError):
+                self.log.warning("Ignoring an invalid camera layout from the API")
         with self.lock:
             if request_id != self.request_id:
                 self.request_id = request_id

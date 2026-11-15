@@ -64,6 +64,13 @@ def camera_setup_router(connect, camera_id, operators, device_key):
         if value != "1":
             raise HTTPException(403, "Use the camera setup controls to make changes")
 
+    def compatible_calibration(calibration, width, height):
+        if calibration is not None and width and height:
+            old_width, old_height = calibration["image_size"]
+            if old_width * height == width * old_height:
+                return calibration
+        return None
+
     @router.get("")
     def status(x_forwarded_user: str = Header(default="")):
         require_operator(x_forwarded_user)
@@ -77,15 +84,11 @@ def camera_setup_router(connect, camera_id, operators, device_key):
         if row is None:
             return {"snapshot": None, "calibration": None, "pending": None}
         snapshot, width, height, calibration, request_id, active = row
-        if calibration and snapshot and calibration["reference_id"] != str(snapshot):
-            old_width, old_height = calibration["image_size"]
-            if old_width * height != width * old_height:
-                calibration = None
         return {
             "snapshot": {"id": snapshot, "width": width, "height": height}
             if snapshot
             else None,
-            "calibration": calibration,
+            "calibration": compatible_calibration(calibration, width, height),
             "pending": request_id if active else None,
         }
 
@@ -157,11 +160,15 @@ def camera_setup_router(connect, camera_id, operators, device_key):
         require_device(x_parksight_device_key)
         with connect() as conn:
             row = conn.execute(
-                """SELECT request_id FROM parksight_camera_setup
-                   WHERE camera_id = %s AND requested_at > NOW() - interval '30 seconds'""",
+                """SELECT CASE WHEN requested_at > NOW() - interval '30 seconds'
+                               THEN request_id END, calibration, width, height
+                   FROM parksight_camera_setup WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone()
-        return {"id": row[0] if row else None}
+        if row is None:
+            return {"id": None, "calibration": None}
+        request_id, calibration, width, height = row
+        return {"id": request_id, "calibration": compatible_calibration(calibration, width, height)}
 
     def store_snapshot(request_id, jpeg, width, height):
         try:

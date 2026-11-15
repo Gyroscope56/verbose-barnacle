@@ -2,9 +2,10 @@ import importlib.util
 import unittest
 from os import environ
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -151,17 +152,19 @@ class CaptureTest(unittest.TestCase):
         testcase = self
 
         class Device:
-            def pending(self):
-                value = api.get(
+            def setup_state(self):
+                return api.get(
                     "/api/camera-setup/device/request", headers=DEVICE
-                ).json()["id"]
-                return UUID(value) if value else None
+                ).json()
 
             def publish(self, current, frame):
                 testcase.assertEqual(str(current), request_id)
                 testcase.assertEqual(testcase.publish(current, frame).status_code, 204)
 
-        bridge = module.CameraSetupBridge(Device(), Mock())
+        cache_dir = TemporaryDirectory()
+        self.addCleanup(cache_dir.cleanup)
+        layout_path = Path(cache_dir.name) / "layout.json"
+        bridge = module.CameraSetupBridge(Device(), Mock(), layout_path)
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
         bridge.offer(frame)  # No snapshot is retained before a request.
         bridge.poll()
@@ -187,6 +190,16 @@ class CaptureTest(unittest.TestCase):
             json={**LAYOUT, "reference_id": request_id},
         )
         self.assertEqual(response.status_code, 200)
+        bridge.poll()
+        self.assertEqual(
+            bridge.regions(1280, 720),
+            (("entry", (154, 216, 538, 504)), ("exit", (704, 216, 1088, 504))),
+        )
+        self.assertEqual(bridge.regions(640, 480), ())
+        offline = module.CameraSetupBridge(Mock(), Mock(), layout_path)
+        self.assertEqual(offline.regions(640, 360), (
+            ("entry", (77, 108, 269, 252)), ("exit", (352, 108, 544, 252))
+        ))
         restarted = self.start_api()
         self.assertEqual(
             restarted.get("/api/camera-setup", headers=OPERATOR).json()["calibration"],
@@ -200,6 +213,8 @@ class CaptureTest(unittest.TestCase):
         self.assertIsNone(
             restarted.get("/api/camera-setup", headers=OPERATOR).json()["calibration"]
         )
+        bridge.poll()
+        self.assertEqual(bridge.regions(1280, 720), ())
         self.assertEqual(
             api.put(
                 "/api/camera-setup/calibration",

@@ -1,8 +1,8 @@
 # Future camera setup and entry/exit zones
 
 The [Databricks setup implementation](../../databricks/README.md) covers capturing,
-drawing, saving, and restoring a layout in preview mode. This plan also records
-the later crossing-detection work.
+drawing, saving, and restoring a layout. The UNO Q uses both saved zones to limit
+motion and plate detection. This plan also records the later crossing-detection work.
 
 After mounting the camera, the operator opens **Camera setup** and clicks **Capture reference frame**. The app returns one current frame from the camera loop. The camera loop owns the device, so this action does not start a second capture process. An unavailable or stale frame shows a retry prompt.
 
@@ -12,4 +12,4 @@ The divider is an oriented line, with an arrow preview showing which crossing di
 
 The setup preview initially records tentative crossing events for review. Before connecting it to Lakebase mutations, decide how to identify and deduplicate a vehicle crossing across retries, restarts, or a momentary obstruction. Keep explicit garage actions available for corrections. Event direction, agreement, and duplicate behavior should be proven with saved bursts before enabling automatic updates.
 
-Test the editor on a phone and desktop, restore a saved layout after restart, and replay both travel directions, a stationary plate, a backing vehicle, and a plate that disappears at the line. The dashboard and camera must remain usable if a setup capture fails.
+Test the editor on a phone and desktop, restore a saved layout after restart, and replay both travel directions, a stationary plate, a backing vehicle, and a plate that disappears at the line. Camera processing must continue if a setup capture fails.

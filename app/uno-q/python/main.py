@@ -196,9 +196,9 @@ def read_frame(index, frame, box, ocr):
     return corrected, details
 
 
-def recognize_burst(frames):
+def recognize_burst(frames, zone=None, region=None):
     STORE.increment("ocr_attempts")
-    LOG.info("Recognition triggered on %d frame(s)", len(frames))
+    LOG.info("Recognition triggered on %d frame(s) in %s", len(frames), zone or "default view")
     models = get_models()
     if models is None:
         LOG.info("No plate recognized")
@@ -211,7 +211,7 @@ def recognize_burst(frames):
     started = monotonic()
     try:
         for index, frame in enumerate(frames):
-            box, score = detect_plate(frame, detector)
+            box, score = detect_plate_in_region(frame, detector, region)
             if box is None:
                 best = "unavailable" if score is None else f"{score:.3f}"
                 notes.append(f"No usable plate box. Best raw detector score {best}.")
@@ -258,11 +258,20 @@ def recognize_burst(frames):
                 LOG.warning("Could not save recognition debug report: %s", exc)
 
 
-def motion_fraction(frame, background):
-    height, width = frame.shape[:2]
-    left, top, right, bottom = MOTION_ROI
-    roi = frame[int(top * height):int(bottom * height),
-                int(left * width):int(right * width)]
+def detect_plate_in_region(frame, detector, region):
+    if region is None:
+        return detect_plate(frame, detector)
+    left, top, right, bottom = region
+    box, score = detect_plate(frame[top:bottom, left:right], detector)
+    if box is None:
+        return None, score
+    x, y, width, height = box
+    return [left + x, top + y, width, height], score
+
+
+def motion_fraction(frame, background, region):
+    left, top, right, bottom = region
+    roi = frame[top:bottom, left:right]
     small = cv2.resize(roi, (160, 90), interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     mask = background.apply(cv2.GaussianBlur(gray, (5, 5), 0))
@@ -283,12 +292,14 @@ def poll_stall(last_stall):
 
 
 def run_camera(camera, worker):
-    background = cv2.createBackgroundSubtractorMOG2(
-        history=100, varThreshold=25, detectShadows=False)
-    warmup_until = monotonic() + WARMUP_SECONDS
+    active_regions = ()
+    backgrounds = {}
+    motion_zone = None
+    burst_zone = None
+    warmup_until = 0.0
     next_motion_sample = 0.0
     next_stall_poll = 0.0
-    last_motion = warmup_until
+    last_motion = 0.0
     last_stall = None
     consecutive_motion = 0
     armed = True
@@ -315,20 +326,47 @@ def run_camera(camera, worker):
             if now < next_motion_sample:
                 continue
             next_motion_sample = now + MOTION_INTERVAL
-            moving = motion_fraction(frame, background) >= FOREGROUND_FRACTION
+            height, width = frame.shape[:2]
+            calibrated = _camera_setup.regions(width, height) if _camera_setup else ()
+            if calibrated:
+                regions = calibrated
+            else:
+                left, top, right, bottom = MOTION_ROI
+                regions = (("approach", (int(left * width), int(top * height),
+                                         int(right * width), int(bottom * height))),)
+            if regions != active_regions:
+                active_regions = regions
+                backgrounds = {
+                    name: cv2.createBackgroundSubtractorMOG2(
+                        history=100, varThreshold=25, detectShadows=False)
+                    for name, _ in regions
+                }
+                warmup_until = now + WARMUP_SECONDS
+                last_motion = warmup_until
+                consecutive_motion = 0
+                motion_zone = None
+                armed = True
+                burst = []
+                LOG.info("Camera detection regions: %s", "calibrated entry and exit" if calibrated else "default approach")
+
+            samples = [(motion_fraction(frame, backgrounds[name], region), name)
+                       for name, region in regions]
+            fraction, zone = max(samples, key=lambda sample: sample[0])
             if now < warmup_until:
                 continue
-            if moving:
+            if fraction >= FOREGROUND_FRACTION:
                 last_motion = now
-                consecutive_motion += 1
+                consecutive_motion = consecutive_motion + 1 if zone == motion_zone else 1
+                motion_zone = zone
             else:
                 consecutive_motion = 0
                 if now - last_motion >= QUIET_SECONDS and ocr_job is None:
                     armed = True
             if armed and consecutive_motion >= 2:
                 armed = False
+                burst_zone = zone if calibrated else None
                 STORE.increment("motion_events")
-                LOG.info("Approach-area motion detected; collecting %d frames", BURST_FRAMES)
+                LOG.info("Motion detected in %s; collecting %d frames", zone, BURST_FRAMES)
                 burst.append(frame.copy())
                 try:
                     Bridge.notify("signal_camera_motion")
@@ -338,7 +376,8 @@ def run_camera(camera, worker):
                 burst.append(frame.copy())
             if len(burst) == BURST_FRAMES:
                 if ocr_job is None:
-                    ocr_job = worker.submit(recognize_burst, burst)
+                    region = dict(active_regions).get(burst_zone)
+                    ocr_job = worker.submit(recognize_burst, burst, burst_zone, region)
                 burst = []
     finally:
         STORE.set(camera="waiting for camera")
