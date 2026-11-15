@@ -2,15 +2,33 @@
 
 from typing import Literal
 from uuid import UUID, uuid4
+from contextlib import nullcontext
+from functools import partial
 
 from fastapi import Header, HTTPException
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
+
+if __package__:
+    from ...spot_updater import update_occupancy
+else:
+    from spot_updater import update_occupancy
 
 
 class SampleResult(BaseModel):
     distance_mm: int | None = Field(ge=1, le=1200)
     error: Literal["insufficient", "unstable"] | None = None
+
+
+class SpotAssignment(BaseModel):
+    spot_id: str = Field(min_length=1, max_length=128)
+
+
+class OccupancyReading(BaseModel):
+    assignment_revision: UUID
+    calibration_revision: UUID
+    occupied: bool = Field(strict=True)
 
 
 def register_stall_routes(router, connect, camera_id, require_operator, require_device,
@@ -22,16 +40,58 @@ def register_stall_routes(router, connect, camera_id, require_operator, require_
             row = conn.execute(
                 """SELECT clear_mm, occupied_mm, settings, applied_revision, sample_error,
                           CASE WHEN sample_until > now() THEN sample_kind END,
-                          CASE WHEN sample_until <= now() THEN sample_kind END
-                   FROM parksight_stall_calibration WHERE camera_id = %s""",
+                          CASE WHEN sample_until <= now() THEN sample_kind END,
+                          spot_id, is_occupied, occupancy_reported_at,
+                          occupancy_reported_at > now() - interval '60 seconds'
+                   FROM parksight_stall_calibration
+                   LEFT JOIN parking_spots ON floor_zone_number = spot_id
+                   WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone()
-        clear, occupied, settings, applied, error, pending, expired = row or (None,) * 7
+        (clear, occupied, settings, applied, error, pending, expired,
+         spot, is_occupied, reported_at, fresh) = row or (None,) * 11
         return {
             "clear_mm": clear, "occupied_mm": occupied, "settings": settings,
             "applied": bool(settings and str(applied) == settings["revision"]),
             "error": "timeout" if expired else error, "pending": pending,
+            "spot_id": spot, "is_occupied": is_occupied,
+            "occupancy_reported_at": reported_at, "occupancy_fresh": bool(fresh),
         }
+
+    @router.get("/stall/spots")
+    def spots(x_forwarded_user: str = Header(default="")):
+        require_operator(x_forwarded_user)
+        with connect() as conn:
+            rows = conn.execute(
+                """SELECT floor_zone_number FROM parking_spots
+                   WHERE floor_zone_number IS NOT NULL ORDER BY floor_zone_number"""
+            ).fetchall()
+        return {"spots": [row[0] for row in rows]}
+
+    @router.put("/stall/spot")
+    def assign_spot(assignment: SpotAssignment, x_forwarded_user: str = Header(default=""),
+                    x_parksight_setup: str = Header(default="")):
+        require_operator(x_forwarded_user)
+        require_setup_action(x_parksight_setup)
+        try:
+            with connect() as conn:
+                if conn.execute(
+                    "SELECT 1 FROM parking_spots WHERE floor_zone_number = %s",
+                    (assignment.spot_id,),
+                ).fetchone() is None:
+                    raise HTTPException(404, "Parking spot not found.")
+                conn.execute(
+                    """INSERT INTO parksight_stall_calibration (camera_id, spot_id, spot_revision)
+                       VALUES (%s, %s, %s)
+                       ON CONFLICT (camera_id) DO UPDATE
+                       SET spot_id = EXCLUDED.spot_id, spot_revision = EXCLUDED.spot_revision,
+                           occupancy_reported_at = NULL
+                       WHERE parksight_stall_calibration.spot_id IS DISTINCT FROM EXCLUDED.spot_id""",
+                    (camera_id, assignment.spot_id, uuid4()),
+                )
+        except UniqueViolation as error:
+            raise HTTPException(409, "That spot is already linked to another sensor.") from error
+        return {"spot_id": assignment.spot_id}
 
     @router.post("/stall/sample/{kind}", status_code=202)
     def request_sample(kind: Literal["clear", "occupied"],
@@ -101,7 +161,8 @@ def register_stall_routes(router, connect, camera_id, require_operator, require_
                 "clear_above_mm": clear - gap // 3,
             }
             conn.execute(
-                "UPDATE parksight_stall_calibration SET settings = %s WHERE camera_id = %s",
+                """UPDATE parksight_stall_calibration
+                   SET settings = %s, occupancy_reported_at = NULL WHERE camera_id = %s""",
                 (Jsonb(settings), camera_id),
             )
         return settings
@@ -114,4 +175,28 @@ def register_stall_routes(router, connect, camera_id, require_operator, require_
                 """UPDATE parksight_stall_calibration SET applied_revision = %s
                    WHERE camera_id = %s AND settings->>'revision' = %s""",
                 (revision, camera_id, str(revision)),
+            )
+
+    @router.put("/device/stall/occupancy", status_code=204)
+    def publish_occupancy(reading: OccupancyReading,
+                          x_parksight_device_key: str = Header(default="")):
+        require_device(x_parksight_device_key)
+        with connect() as conn:
+            row = conn.execute(
+                """SELECT spot_id FROM parksight_stall_calibration
+                   WHERE camera_id = %s AND spot_revision = %s AND applied_revision = %s
+                     AND settings->>'revision' = %s FOR UPDATE""",
+                (camera_id, reading.assignment_revision, reading.calibration_revision,
+                 str(reading.calibration_revision)),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(409, "Sensor calibration or spot assignment has changed.")
+            try:
+                update_occupancy(row[0], reading.occupied, connection=partial(nullcontext, conn))
+            except ValueError as error:
+                raise HTTPException(409, "The assigned parking spot is unavailable.") from error
+            conn.execute(
+                """UPDATE parksight_stall_calibration SET occupancy_reported_at = now()
+                   WHERE camera_id = %s""",
+                (camera_id,),
             )

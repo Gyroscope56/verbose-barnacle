@@ -745,6 +745,18 @@ button.primary:active:not(:disabled) {
 .stall-samples p { font-family: var(--font-mono); margin: .45rem 0; }
 .stall-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin-top: 1rem; }
 #stall-thresholds { margin-top: .5rem; }
+.stall-spot { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle); }
+.stall-spot .stall-actions { margin-top: 0; }
+#stall-spot {
+  min-width: 12rem;
+  padding: .5rem .6rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-default);
+  background-color: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font: inherit;
+}
+#stall-occupancy { margin-top: .5rem; font-family: var(--font-mono); }
 @media (max-width: 520px) {
   .stall-samples { grid-template-columns: minmax(0, 1fr); }
 }

@@ -142,6 +142,14 @@ def create_app(upstream=requests.request):
     def stall_apply():
         return forward("/api/camera-setup/stall/apply")
 
+    @app.get("/api/camera-setup/stall/spots")
+    def stall_spots():
+        return forward("/api/camera-setup/stall/spots")
+
+    @app.put("/api/camera-setup/stall/spot")
+    def stall_spot():
+        return forward("/api/camera-setup/stall/spot")
+
     return app
 
 

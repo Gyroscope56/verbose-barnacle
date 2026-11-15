@@ -148,6 +148,16 @@
         <p id="stall-status" role="status">Loading sensor setup…</p>
       </div>
       <p id="stall-thresholds"></p>
+      <div class="stall-spot">
+        <label class="section-label" for="stall-spot">Parking spot</label>
+        <div class="stall-actions">
+          <select id="stall-spot" disabled>
+            <option value="">Choose a spot</option>
+          </select>
+          <button id="stall-assign" class="quiet-action" type="button" disabled>Link spot</button>
+        </div>
+        <p id="stall-occupancy" role="status" aria-live="polite">No spot linked. The sensor won’t update the garage table.</p>
+      </div>
     </section>
   </main>
 </body>

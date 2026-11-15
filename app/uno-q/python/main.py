@@ -316,6 +316,8 @@ def poll_stall(last_stall):
         stall = str(Bridge.call("stall_state", timeout=0.25))
     except BRIDGE_ERRORS:
         stall = "unknown (Bridge unavailable)"
+    if _camera_setup is not None:
+        _camera_setup.stall_sensor.observe(stall)
     if _lakebase is not None:
         _lakebase.sync.observe(stall)
     if stall != last_stall:

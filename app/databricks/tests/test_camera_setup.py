@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import unittest
 from base64 import b64decode, b64encode
@@ -7,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
 from uuid import uuid4
 
 import cv2
@@ -90,6 +92,27 @@ class FrontendTest(unittest.TestCase):
             "https://my-web-api-example.aws.databricksapps.com/",
         )
 
+    def test_forward_stall_spot_assignment(self):
+        upstream = Mock(return_value=SimpleNamespace(
+            headers={"Content-Type": "application/json"}, content=b'{"spot_id":"1-A-01"}',
+            status_code=200, is_redirect=False,
+        ))
+        with patch.dict(environ, PARKSIGHT_API_URL="https://my-web-api-example.aws.databricksapps.com"):
+            browser = create_app(upstream).test_client()
+        token = {"X-Forwarded-Access-Token": "test-user-token"}
+        self.assertEqual(browser.put("/api/camera-setup/stall/spot", json={"spot_id": "1-A-01"},
+                                     headers=token).status_code, 403)
+        upstream.assert_not_called()
+        response = browser.put("/api/camera-setup/stall/spot", json={"spot_id": "1-A-01"},
+                               headers={**token, "X-ParkSight-Setup": "1"})
+        self.assertEqual(response.status_code, 200)
+        args, kwargs = upstream.call_args
+        self.assertEqual(args, ("PUT", "https://my-web-api-example.aws.databricksapps.com/api/camera-setup/stall/spot"))
+        self.assertEqual(json.loads(kwargs["data"]), {"spot_id": "1-A-01"})
+        browser.get("/api/camera-setup/stall/spots", headers=token)
+        self.assertEqual(upstream.call_args.args[1],
+                         "https://my-web-api-example.aws.databricksapps.com/api/camera-setup/stall/spots")
+
     def test_snapshot_id_is_validated(self):
         app = create_app(Mock())
         self.assertEqual(
@@ -121,6 +144,10 @@ class CaptureTest(unittest.TestCase):
                 CREATE TABLE garage_visit_history (
                     license_plate text NOT NULL, has_entrance_ticket boolean NOT NULL,
                     time_in timestamptz NOT NULL, time_out timestamptz NOT NULL
+                );
+                CREATE TABLE parking_spots (
+                    floor_zone_number text PRIMARY KEY, is_occupied boolean NOT NULL,
+                    last_occupied timestamptz, time_occupied interval
                 );
             """)
         self.api = self.start_api()
@@ -453,3 +480,83 @@ class CaptureTest(unittest.TestCase):
             setter.reset_mock()
             restarted.tick(Mock(), setter)
             setter.assert_called_once_with(466, 634)
+
+    def test_stall_sensor_updates_its_assigned_parking_spot(self):
+        base = "/api/camera-setup"
+        stall = base + "/stall"
+        with self.connect() as conn:
+            conn.execute("""
+                INSERT INTO parking_spots VALUES ('1-A-01', FALSE, NULL, NULL), ('1-A-02', FALSE, NULL, NULL);
+                INSERT INTO parksight_stall_calibration (camera_id, spot_id) VALUES ('other-camera', '1-A-02');
+            """)
+        self.assertEqual(self.api.get(stall + "/spots", headers=DEVICE).status_code, 403)
+        self.assertEqual(self.api.get(stall + "/spots", headers=OPERATOR).json(),
+                         {"spots": ["1-A-01", "1-A-02"]})
+        self.assertEqual(self.api.put(stall + "/spot", json={"spot_id": "9-Z-99"}, headers=OPERATOR).status_code, 404)
+        self.assertEqual(self.api.put(stall + "/spot", json={"spot_id": "1-A-02"}, headers=OPERATOR).status_code, 409)
+        self.assertEqual(
+            self.api.put(stall + "/spot", json={"spot_id": "1-A-01"},
+                         headers={"X-Forwarded-User": "operator"}).status_code,
+            403,
+        )
+        self.assertEqual(self.api.put(stall + "/spot", json={"spot_id": "1-A-01"}, headers=OPERATOR).status_code, 200)
+        assignment = self.api.get(base + "/device/request", headers=DEVICE).json()["stall_assignment"]
+        self.assertIsNotNone(assignment)
+        self.api.put(stall + "/spot", json={"spot_id": "1-A-01"}, headers=OPERATOR)
+        self.assertEqual(self.api.get(base + "/device/request", headers=DEVICE).json()["stall_assignment"], assignment)
+
+        api = self.api
+
+        class Client:
+            def call(self, path, method="GET", data=None, headers=None):
+                response = api.request(method, base + "/device" + path, content=data,
+                                       headers={**DEVICE, **(headers or {})})
+                if response.status_code >= 400:
+                    raise HTTPError(path, response.status_code, "", None, None)
+
+        with self.connect() as conn:
+            for kind, mm in (("clear", 800), ("occupied", 300)):
+                conn.execute(
+                    """UPDATE parksight_stall_calibration SET clear_mm = CASE WHEN %s = 'clear' THEN %s ELSE clear_mm END,
+                           occupied_mm = CASE WHEN %s = 'occupied' THEN %s ELSE occupied_mm END
+                       WHERE camera_id = 'entrance-camera'""",
+                    (kind, mm, kind, mm),
+                )
+        settings = self.api.post(stall + "/apply", headers=OPERATOR).json()
+        with TemporaryDirectory() as directory:
+            sensor = module.StallSensor(Path(directory) / "stall.json", Mock())
+            sensor.update(None, settings, assignment)
+            sensor.observe("occupied")
+            sensor.sync(Client())
+            self.assertFalse(self.api.get(stall, headers=OPERATOR).json()["occupancy_fresh"])
+            sensor.tick(Mock(), Mock(return_value=True))
+            sensor.sync(Client())
+            state = self.api.get(stall, headers=OPERATOR).json()
+            self.assertEqual((state["spot_id"], state["is_occupied"], state["occupancy_fresh"]),
+                             ("1-A-01", True, True))
+            with self.connect() as conn:
+                started = conn.execute(
+                    "SELECT last_occupied FROM parking_spots WHERE floor_zone_number = '1-A-01'"
+                ).fetchone()[0]
+            self.assertIsNotNone(started)
+            sensor.refresh_at = 0
+            sensor.sync(Client())
+            with self.connect() as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT last_occupied FROM parking_spots WHERE floor_zone_number = '1-A-01'"
+                ).fetchone()[0], started)
+            sensor.observe("unknown (Bridge unavailable)")
+            sensor.sync(Client())
+            self.assertTrue(self.api.get(stall, headers=OPERATOR).json()["is_occupied"])
+            sensor.observe("clear")
+            sensor.sync(Client())
+            self.assertFalse(self.api.get(stall, headers=OPERATOR).json()["is_occupied"])
+            stale = {"assignment_revision": str(uuid4()), "calibration_revision": settings["revision"],
+                     "occupied": True}
+            self.assertEqual(self.api.put(base + "/device/stall/occupancy", json=stale, headers=DEVICE).status_code, 409)
+            self.assertEqual(
+                self.api.put(base + "/device/stall/occupancy", json={**stale, "assignment_revision": assignment},
+                             headers=OPERATOR).status_code,
+                403,
+            )
+            self.assertFalse(self.api.get(stall, headers=OPERATOR).json()["is_occupied"])

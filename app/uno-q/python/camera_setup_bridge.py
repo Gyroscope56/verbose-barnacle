@@ -313,7 +313,8 @@ class CameraSetupBridge:
     def poll(self):
         state = self.client.setup_state()
         self.stall_available = state.get("stall_available") is True
-        self.stall_sensor.update(state.get("stall_sample_id"), state.get("stall_settings"))
+        self.stall_sensor.update(state.get("stall_sample_id"), state.get("stall_settings"),
+                                 state.get("stall_assignment"))
         request_id = UUID(state["id"]) if state["id"] else None
         self.garage_enabled = state.get("garage_enabled") is True
         if "calibration" in state:

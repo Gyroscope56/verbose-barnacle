@@ -19,6 +19,10 @@ class StallSensor:
         self.sample_id = None
         self.samples = []
         self.result = None
+        self.assignment = None
+        self.occupancy = None
+        self.reported = None
+        self.refresh_at = 0.0
         try:
             self.settings = json.loads(cache.read_text())
         except FileNotFoundError:
@@ -26,7 +30,7 @@ class StallSensor:
         except (OSError, ValueError):
             log.warning("Could not read saved stall thresholds")
 
-    def update(self, sample_id, settings):
+    def update(self, sample_id, settings, assignment=None):
         with self.lock:
             if self.sample_id != sample_id:
                 self.sample_id = sample_id
@@ -34,6 +38,13 @@ class StallSensor:
                 self.result = None
             if settings is not None:
                 self.settings = settings
+            self.assignment = assignment
+
+    def observe(self, state):
+        with self.lock:
+            self.occupancy = {"occupied": True, "clear": False}.get(state)
+            if self.occupancy is None:
+                self.reported = None
 
     def tick(self, read_mm, configure):
         with self.lock:
@@ -91,3 +102,28 @@ class StallSensor:
         if revision is not None and revision != self.sent_revision:
             client.call(f"/stall/applied/{revision}", method="PUT")
             self.sent_revision = revision
+        self.sync_occupancy(client)
+
+    def sync_occupancy(self, client):
+        with self.lock:
+            calibration = self.settings["revision"] if self.settings else None
+            if (not self.assignment or not calibration or self.applied != calibration
+                    or self.sent_revision != calibration or self.occupancy is None):
+                return
+            report = (self.assignment, calibration, self.occupancy)
+            if self.reported == report and monotonic() < self.refresh_at:
+                return
+        assignment, revision, occupied = report
+        try:
+            client.call("/stall/occupancy", method="PUT", data=json.dumps({
+                "assignment_revision": assignment, "calibration_revision": revision,
+                "occupied": occupied,
+            }).encode(), headers={"Content-Type": "application/json"})
+        except HTTPError as error:
+            if error.code == 409:
+                return
+            raise
+        with self.lock:
+            if self.occupancy is not None:
+                self.reported = report
+                self.refresh_at = monotonic() + 30

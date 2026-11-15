@@ -194,12 +194,12 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
                 (camera_id,),
             ).fetchone() if debug_enabled else None
             stall = conn.execute(
-                """SELECT CASE WHEN sample_until > now() THEN sample_id END, settings
+                """SELECT CASE WHEN sample_until > now() THEN sample_id END, settings, spot_revision
                    FROM parksight_stall_calibration WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone() if stall_enabled else None
         debug_requested, manual_id = debug or (False, None)
-        stall_sample_id, stall_settings = stall or (None, None)
+        stall_sample_id, stall_settings, stall_assignment = stall or (None, None, None)
         request_id, calibration, width, height = row or (None, None, None, None)
         return {
             "id": request_id,
@@ -210,6 +210,7 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
             "stall_sample_id": stall_sample_id,
             "stall_settings": stall_settings,
             "stall_available": stall_enabled,
+            "stall_assignment": stall_assignment,
         }
 
     if record_read is not None:
