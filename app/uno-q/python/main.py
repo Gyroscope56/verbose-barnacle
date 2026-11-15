@@ -16,6 +16,7 @@ from time import monotonic
 import cv2
 import numpy as np
 from arduino.app_utils import App, Bridge
+from camera_setup_bridge import CameraSetupBridge
 from garage_sync import LakebaseIntegration
 from log_dashboard import LiveLogStore, configure_logging, start_web_server
 from plate_crop import crop_quality, straighten_plate
@@ -75,6 +76,7 @@ _detector = None
 _ocr = None
 _models_failed = False
 _lakebase = None
+_camera_setup = None
 
 
 def get_models():
@@ -301,6 +303,8 @@ def run_camera(camera, worker):
             frame = camera.capture()
             if frame is None:
                 raise RuntimeError("USB camera stopped returning frames")
+            if _camera_setup is not None:
+                _camera_setup.offer(frame)
             now = monotonic()
             if ocr_job is not None and ocr_job.done():
                 ocr_job.result()
@@ -364,11 +368,12 @@ def run_service():
 
 
 def main():
-    global _lakebase
+    global _lakebase, _camera_setup
     app_dir = MODEL_DIR.parent
     _lakebase = LakebaseIntegration.load(
         app_dir / "lakebase.json", app_dir / ".cache" / "lakebase-occupancy.json", STORE, LOG
     )
+    _camera_setup = CameraSetupBridge.load(app_dir / "camera-setup.json", LOG)
     try:
         start_web_server(STORE, LOG, debug_report=DEBUG_REPORT, lakebase=_lakebase)
     except OSError:
@@ -379,11 +384,15 @@ def main():
     LOG.info("Web dashboard remains available while the camera is disconnected")
     if _lakebase is not None:
         _lakebase.sync.start()
+    if _camera_setup is not None:
+        _camera_setup.start()
     try:
         App.run(run_service)
     finally:
         if _lakebase is not None:
             _lakebase.sync.stop()
+        if _camera_setup is not None:
+            _camera_setup.stop()
 
 
 if __name__ == "__main__":

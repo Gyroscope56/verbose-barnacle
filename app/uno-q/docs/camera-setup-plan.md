@@ -1,5 +1,9 @@
 # Future camera setup and entry/exit zones
 
+The [Databricks setup implementation](../../databricks/README.md) covers capturing,
+drawing, saving, and restoring a layout in preview mode. This plan also records
+the later crossing-detection work.
+
 After mounting the camera, the operator opens **Camera setup** and clicks **Capture reference frame**. The app returns one current frame from the camera loop. The camera loop owns the device, so this action does not start a second capture process. An unavailable or stale frame shows a retry prompt.
 
 On the reference image, the operator draws or adjusts a divider and two rectangular detection zones, one labeled **Entry** and one labeled **Exit**. The editor supports dragging, resizing, resetting, and saving. It shows the captured aspect ratio and overlays on a preview so the operator can check the placement before saving. Coordinates are normalized to the captured image, with a configuration version and capture aspect ratio. Resize and orientation changes on the client do not shift the zones. A changed camera mount or a different capture aspect ratio requires a new reference.

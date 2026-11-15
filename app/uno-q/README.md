@@ -35,3 +35,7 @@ The test schema expects a unique value in `g_sessions.license_plate` and one `pa
 Run local checks from the repository root with `python -m unittest discover -s app/tests -v`. Supply `PARKSIGHT_TEST_POSTGRES` for the tests that create and drop a disposable PostgreSQL schema.
 
 The [camera setup plan](docs/camera-setup-plan.md) covers the future installed-camera snapshot, divider editor, and entry/exit zones.
+
+## Databricks camera setup bridge
+
+The optional outbound snapshot worker serves the [Databricks calibration editor](../databricks/README.md). It is disabled until a local `camera-setup.json` enables it. The camera remains under the existing capture loop, and saved zones are preview-only.
