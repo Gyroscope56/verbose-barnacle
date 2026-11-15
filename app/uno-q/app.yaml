@@ -1,5 +1,4 @@
-name: ParkSight Camera Starter - Offline Dashboard
-description: Webcam motion detection, Modulino stall occupancy and offline Wi-Fi log dashboard
+name: ParkSight Camera Starter
+description: Webcam plate recognition, Modulino stall occupancy and Databricks camera setup
 icon: 🚗
-ports: [5001]
 bricks: []

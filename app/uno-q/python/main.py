@@ -1,4 +1,4 @@
-"""ParkSight UNO Q: resilient camera, local dashboard, detector + OCR pipeline.
+"""ParkSight UNO Q: resilient camera, detector + OCR pipeline.
 
 Keep this file at <app>/python/main.py alongside log_dashboard.py.
 The models live at <app>/models/{detector,ocr}.onnx.
@@ -18,7 +18,7 @@ import numpy as np
 from arduino.app_utils import App, Bridge
 from camera_setup_bridge import CameraSetupBridge
 from garage_sync import LakebaseIntegration
-from log_dashboard import LiveLogStore, configure_logging, start_web_server
+from log_dashboard import LiveLogStore, configure_logging
 from plate_crop import crop_quality, straighten_plate
 from plate_line_ocr import PlateLineRecognizer, normalize_plate
 from plate_state import guess_plate_state
@@ -104,7 +104,7 @@ def get_models():
         return _detector, _ocr
     except Exception:
         _models_failed = True
-        LOG.exception("ONNX models unavailable; motion detection and dashboard will continue")
+        LOG.exception("ONNX models unavailable; motion detection will continue")
         return None
 
 
@@ -345,7 +345,7 @@ def run_camera(camera, worker):
 
 
 def run_service():
-    """Remain alive and keep the dashboard up even with no webcam attached."""
+    """Keep polling the MCU and retry camera discovery while the webcam is unavailable."""
     last_stall = None
     failures = 0
     with ThreadPoolExecutor(max_workers=1) as worker:
@@ -358,8 +358,8 @@ def run_service():
                 failures += 1
                 STORE.set(camera="waiting for camera")
                 if failures == 1 or failures % 6 == 0:
-                    LOG.warning("Camera unavailable (%s); retrying every %ds. "
-                                "Dashboard stays online.", exc, CAMERA_RETRY_SECONDS)
+                    LOG.warning("Camera unavailable (%s); retrying every %ds",
+                                exc, CAMERA_RETRY_SECONDS)
                 # Keep polling the MCU sensor while the webcam is unplugged.
                 end = monotonic() + CAMERA_RETRY_SECONDS
                 while monotonic() < end:
@@ -374,14 +374,9 @@ def main():
         app_dir / "lakebase.json", app_dir / ".cache" / "lakebase-occupancy.json", STORE, LOG
     )
     _camera_setup = CameraSetupBridge.load(app_dir / "camera-setup.json", LOG)
-    try:
-        start_web_server(STORE, LOG, debug_report=DEBUG_REPORT, lakebase=_lakebase)
-    except OSError:
-        LOG.exception("Could not bind dashboard to port 5001")
-    LOG.info("ParkSight starting; Linux NetworkManager manages the Wi-Fi hotspot")
+    LOG.info("ParkSight starting")
     LOG.info("Models directory: %s", MODEL_DIR)
     get_models()  # Log ONNX Runtime/model readiness at startup without crashing.
-    LOG.info("Web dashboard remains available while the camera is disconnected")
     if _lakebase is not None:
         _lakebase.sync.start()
     if _camera_setup is not None:
