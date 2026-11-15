@@ -16,7 +16,11 @@
   <main>
     <header class="intro">
       <div class="intro-heading"><h1>Camera debug</h1></div>
-      <button class="quiet-action" id="toggle" type="button">Pause preview</button>
+      <div class="debug-controls">
+        <button class="quiet-action" id="toggle" type="button">Pause preview</button>
+        <button class="quiet-action" id="demo-toggle" type="button" aria-pressed="false">Demo mode</button>
+        <button class="primary" id="manual-run" type="button" hidden>Run inference</button>
+      </div>
     </header>
 
     <div class="debug-grid">
@@ -41,6 +45,7 @@
           <h2 id="result-title">Latest inference</h2>
           <p id="decision">Waiting for a motion-triggered read.</p>
           <p class="debug-meta" id="inference-meta"></p>
+          <p class="debug-meta" id="manual-status" role="status" hidden></p>
         </section>
         <section aria-labelledby="garage-title">
           <h2 id="garage-title">Latest garage result</h2>

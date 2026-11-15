@@ -177,17 +177,21 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
                    FROM parksight_camera_setup WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone()
-            debug_requested = debug_enabled and conn.execute(
-                """SELECT EXISTS (SELECT 1 FROM parksight_camera_debug
-                                  WHERE camera_id = %s AND viewed_until > now())""",
+            debug = conn.execute(
+                """SELECT viewed_until > now(),
+                          CASE WHEN manual_until > now() AND manual_report IS NULL
+                               THEN manual_id END
+                   FROM parksight_camera_debug WHERE camera_id = %s""",
                 (camera_id,),
-            ).fetchone()[0]
+            ).fetchone() if debug_enabled else None
+        debug_requested, manual_id = debug or (False, None)
         request_id, calibration, width, height = row or (None, None, None, None)
         return {
             "id": request_id,
             "calibration": compatible_calibration(calibration, width, height),
             "garage_enabled": record_read is not None,
             "debug_requested": debug_requested,
+            "manual_id": manual_id,
         }
 
     if record_read is not None:

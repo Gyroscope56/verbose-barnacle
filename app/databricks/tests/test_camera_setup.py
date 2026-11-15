@@ -365,3 +365,40 @@ class CaptureTest(unittest.TestCase):
             client.send_garage_read.reset_mock()
             restarted.sync_garage_read()
             client.send_garage_read.assert_not_called()
+
+    def test_manual_inference_is_requested_and_returns_its_own_report(self):
+        base = "/api/camera-setup"
+        route = base + "/debug/run"
+        send = base + "/device/debug/manual-report"
+        self.assertEqual(self.api.post(route, headers=DEVICE).status_code, 403)
+        requested = self.api.post(route, headers=OPERATOR)
+        self.assertEqual(requested.status_code, 202)
+        run_id = requested.json()["id"]
+        self.assertEqual(self.api.post(route, headers=OPERATOR).json()["id"], run_id)
+        state = self.api.get(base + "/device/request", headers=DEVICE).json()
+        self.assertEqual(state["manual_id"], run_id)
+        self.assertTrue(state["garage_enabled"])
+
+        with TemporaryDirectory() as directory:
+            bridge = module.CameraSetupBridge(Mock(), Mock(), Path(directory) / "layout.json")
+            bridge.client.setup_state.return_value = state
+            bridge.poll()
+            raw = np.zeros((120, 160, 3), np.uint8)
+            self.assertIsNone(bridge.take_manual_burst(raw, 0.0, 2, .2))
+            self.assertIsNone(bridge.take_manual_burst(raw, .1, 2, .2))
+            selected, frames = bridge.take_manual_burst(raw, .2, 2, .2)
+            self.assertEqual(selected, run_id)
+            self.assertEqual(len(frames), 2)
+            self.assertIsNone(bridge.take_manual_burst(raw, .4, 2, .2))
+
+        result_url = route + "/" + run_id
+        self.assertIsNone(self.api.get(result_url, headers=OPERATOR).json()["report"])
+        payload = {
+            "id": run_id, "width": 160, "height": 120, "frame_number": 2, "zone": None,
+            "elapsed": .3, "threshold": .35, "decision": "No reliable read",
+            "notes": [], "detection": None, "frame": "AA==", "crop": None, "ocr_input": None,
+        }
+        self.assertEqual(self.api.put(send, json=payload, headers=DEVICE).status_code, 204)
+        self.assertEqual(self.api.get(result_url, headers=OPERATOR).json()["report"], payload)
+        self.assertIsNone(self.api.get(base + "/debug/report", headers=OPERATOR).json()["report"])
+        self.assertIsNone(self.api.get(base + "/device/request", headers=DEVICE).json()["manual_id"])

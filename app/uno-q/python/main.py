@@ -59,7 +59,7 @@ CAMERA_RESOLUTION = (1280, 720)
 CAMERA_FPS = 15
 MOTION_ROI = (0.15, 0.25, 0.85, 0.90)
 MOTION_INTERVAL = 0.2
-FOREGROUND_FRACTION = 0.05
+FOREGROUND_FRACTION = 0.03
 WARMUP_SECONDS = 2.0
 QUIET_SECONDS = 1.0
 BURST_FRAMES = 6
@@ -196,21 +196,21 @@ def read_frame(index, frame, box, ocr):
     return corrected, details
 
 
-def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
+def recognize_burst(frames, zone=None, region=None, garage_enabled=False, *, manual_id=None):
     STORE.increment("ocr_attempts")
     LOG.info("Recognition triggered on %d frame(s) in %s", len(frames), zone or "default view")
-    models = get_models()
-    if models is None:
-        LOG.info("No plate recognized")
-        return
-
-    detector, ocr = models
     notes = []
     readings = []
     detections = {}
     decision = "No reliable read"
     started = monotonic()
     try:
+        models = get_models()
+        if models is None:
+            decision = "Detector or OCR model unavailable"
+            LOG.warning("%s", decision)
+            return
+        detector, ocr = models
         for index, frame in enumerate(frames):
             box, score = detect_plate_in_region(frame, detector, region)
             if box is None:
@@ -260,7 +260,7 @@ def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
                     "frame_number": index + 1, "zone": zone, "elapsed": elapsed,
                     "threshold": DETECTOR_THRESHOLD, "decision": decision,
                     "notes": notes, "detection": detections.get(index),
-                }, frames[index], plate_crop, ocr_input)
+                }, frames[index], plate_crop, ocr_input, manual_id=manual_id)
             try:
                 save_debug_report(
                     DEBUG_REPORT, frames[index], ocr_input, notes, DETECTOR_THRESHOLD, elapsed,
@@ -336,6 +336,13 @@ def run_camera(camera, worker):
             if _camera_setup is not None:
                 _camera_setup.offer(frame)
             now = monotonic()
+            if _camera_setup is not None:
+                manual = _camera_setup.take_manual_burst(
+                    frame, now, BURST_FRAMES, MOTION_INTERVAL
+                )
+                if manual is not None:
+                    manual_id, frames = manual
+                    worker.submit(recognize_burst, frames, manual_id=manual_id)
             if ocr_job is not None and ocr_job.done():
                 ocr_job.result()
                 ocr_job = None

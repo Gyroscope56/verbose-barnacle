@@ -2,7 +2,7 @@
 
 from base64 import b64encode
 from io import BytesIO
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Header, HTTPException, Request, Response
 from PIL import Image, UnidentifiedImageError
@@ -98,6 +98,45 @@ def register_debug_routes(router, connect, camera_id, require_operator, require_
             ).fetchone()
         return {"report": row[0], "received_at": row[1]} if row else {"report": None}
 
+    @router.post("/debug/run", status_code=202)
+    def run_models(x_forwarded_user: str = Header(default=""),
+                   x_parksight_setup: str = Header(default="")):
+        require_operator(x_forwarded_user)
+        require_setup_action(x_parksight_setup)
+        with connect() as conn:
+            row = conn.execute(
+                """INSERT INTO parksight_camera_debug
+                       (camera_id, viewed_until, manual_id, manual_until)
+                   VALUES (%s, now(), %s, now() + interval '30 seconds')
+                   ON CONFLICT (camera_id) DO UPDATE
+                   SET manual_id = EXCLUDED.manual_id, manual_until = EXCLUDED.manual_until,
+                       manual_report = NULL, manual_at = NULL
+                   WHERE parksight_camera_debug.manual_until IS NULL
+                      OR parksight_camera_debug.manual_until <= now()
+                      OR parksight_camera_debug.manual_report IS NOT NULL
+                   RETURNING manual_id""",
+                (camera_id, uuid4()),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT manual_id FROM parksight_camera_debug WHERE camera_id = %s",
+                    (camera_id,),
+                ).fetchone()
+        return {"id": row[0]}
+
+    @router.get("/debug/run/{request_id}")
+    def manual_result(request_id: UUID, x_forwarded_user: str = Header(default="")):
+        require_operator(x_forwarded_user)
+        with connect() as conn:
+            row = conn.execute(
+                """SELECT manual_report, manual_at, manual_until > now()
+                   FROM parksight_camera_debug WHERE camera_id = %s AND manual_id = %s""",
+                (camera_id, request_id),
+            ).fetchone()
+        if row is None or (row[0] is None and not row[2]):
+            raise HTTPException(410, "Manual run expired. Check the camera and try again.")
+        return {"report": row[0], "received_at": row[1]}
+
     def save_preview(jpeg, width, height):
         try:
             with Image.open(BytesIO(jpeg), formats=["JPEG"]) as image:
@@ -134,13 +173,35 @@ def register_debug_routes(router, connect, camera_id, require_operator, require_
             if not updated:
                 raise HTTPException(409, "No active debug viewer")
 
+    async def parse_report(request):
+        body = await read_payload(request, REPORT_LIMIT)
+        try:
+            return DebugReport.model_validate_json(body)
+        except ValidationError as error:
+            raise HTTPException(400, "Invalid recognition report") from error
+
     @router.put("/device/debug/report", status_code=204)
     async def publish_report(request: Request, x_parksight_device_key: str = Header(default="")):
         require_device(x_parksight_device_key)
-        body = await read_payload(request, REPORT_LIMIT)
-        try:
-            payload = DebugReport.model_validate_json(body)
-        except ValidationError as error:
-            raise HTTPException(400, "Invalid recognition report") from error
+        payload = await parse_report(request)
         await run_in_threadpool(save_report, payload)
+        return Response(status_code=204)
+
+    def save_manual_report(payload):
+        with connect() as conn:
+            updated = conn.execute(
+                """UPDATE parksight_camera_debug
+                   SET manual_report = %s, manual_at = COALESCE(manual_at, now())
+                   WHERE camera_id = %s AND manual_id = %s AND manual_until > now()""",
+                (Jsonb(payload.model_dump(mode="json")), camera_id, payload.id),
+            ).rowcount
+            if not updated:
+                raise HTTPException(409, "Manual run expired or was replaced")
+
+    @router.put("/device/debug/manual-report", status_code=204)
+    async def publish_manual_report(request: Request,
+                                    x_parksight_device_key: str = Header(default="")):
+        require_device(x_parksight_device_key)
+        payload = await parse_report(request)
+        await run_in_threadpool(save_manual_report, payload)
         return Response(status_code=204)

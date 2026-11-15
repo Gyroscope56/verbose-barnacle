@@ -102,6 +102,14 @@ def create_app(upstream=requests.request):
     def debug_report():
         return forward("/api/camera-setup/debug/report")
 
+    @app.post("/api/debug/run")
+    def run_models():
+        return forward("/api/camera-setup/debug/run")
+
+    @app.get("/api/debug/run/<uuid:request_id>")
+    def manual_result(request_id):
+        return forward(f"/api/camera-setup/debug/run/{request_id}")
+
     @app.get("/api-check")
     def api_check():
         return forward("/", probe=True)

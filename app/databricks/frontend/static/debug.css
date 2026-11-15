@@ -3,6 +3,9 @@
   grid-template-columns: minmax(0, 2.5fr) minmax(0, 1fr);
   gap: var(--gutter);
 }
+.debug-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.debug-controls [hidden] { display: none; }
+#demo-toggle[aria-pressed="true"] { color: var(--primary); background: #e7ebff; }
 .debug-viewport {
   display: grid;
   align-self: start;

@@ -109,11 +109,12 @@ class DeviceClient:
             "Content-Type": "image/jpeg", "X-Image-Width": str(width), "X-Image-Height": str(height),
         })
 
-    def publish_debug_report(self, detail, frame, crop, ocr_input):
+    def publish_debug_report(self, detail, frame, crop, ocr_input, *, manual=False):
         payload = {**detail}
         for name, image in (("frame", frame), ("crop", crop), ("ocr_input", ocr_input)):
             payload[name] = b64encode(jpeg_bytes(image, 82)).decode() if image is not None else None
-        self.call("/debug/report", method="PUT", data=json.dumps(payload).encode(),
+        path = "/debug/manual-report" if manual else "/debug/report"
+        self.call(path, method="PUT", data=json.dumps(payload).encode(),
                   headers={"Content-Type": "application/json"})
 
     def publish(self, request_id, frame):
@@ -152,6 +153,11 @@ class CameraSetupBridge:
         self.debug_report = None
         self.debug_sent_report = None
         self.debug_retry_at = 0.0
+        self.manual_id = None
+        self.manual_taken = None
+        self.manual_frames = []
+        self.manual_next_frame = 0.0
+        self.manual_report = None
         try:
             self.set_calibration(json.loads(layout_path.read_text()), cache=False)
         except FileNotFoundError:
@@ -192,19 +198,49 @@ class CameraSetupBridge:
                 self.debug_frame = frame.copy()
                 self.debug_next_frame = monotonic() + 0.5
 
-    def offer_debug_report(self, detail, frame, crop, ocr_input):
-        height, width = frame.shape[:2]
+    def take_manual_burst(self, frame, now, frame_count, interval):
         with self.lock:
-            self.debug_report = ({**detail, "id": str(uuid4()), "height": height, "width": width},
-                                 frame, crop, ocr_input)
+            if self.manual_id is None or self.manual_id == self.manual_taken:
+                return None
+            if now < self.manual_next_frame:
+                return None
+            self.manual_next_frame = now + interval
+            self.manual_frames.append(frame.copy())
+            if len(self.manual_frames) < frame_count:
+                return None
+            frames, self.manual_frames = self.manual_frames, []
+            self.manual_taken = self.manual_id
+            return self.manual_id, frames
+
+    def offer_debug_report(self, detail, frame, crop, ocr_input, *, manual_id=None):
+        height, width = frame.shape[:2]
+        report = ({**detail, "id": manual_id or str(uuid4()), "height": height, "width": width},
+                  frame, crop, ocr_input)
+        with self.lock:
+            if manual_id:
+                self.manual_report = report
+            else:
+                self.debug_report = report
 
     def sync_debug(self):
-        if not self.debug_requested or monotonic() < self.debug_retry_at:
+        if monotonic() < self.debug_retry_at:
             return
         with self.lock:
             frame, self.debug_frame = self.debug_frame, None
             report = self.debug_report
+            manual = self.manual_report
         try:
+            if manual is not None:
+                try:
+                    self.client.publish_debug_report(*manual, manual=True)
+                except HTTPError as error:
+                    if error.code != 409:
+                        raise
+                with self.lock:
+                    if self.manual_report is manual:
+                        self.manual_report = None
+            if not self.debug_requested:
+                return
             if frame is not None:
                 self.client.publish_debug_preview(frame)
             if report is not None and report[0]["id"] != self.debug_sent_report:
@@ -281,6 +317,11 @@ class CameraSetupBridge:
             except (ValueError, TypeError, KeyError, OverflowError):
                 self.log.warning("Ignoring an invalid camera layout from the API")
         with self.lock:
+            manual_id = state.get("manual_id")
+            if manual_id != self.manual_id:
+                self.manual_id = manual_id
+                self.manual_frames = []
+                self.manual_next_frame = 0.0
             self.debug_requested = state.get("debug_requested") is True
             if not self.debug_requested:
                 self.debug_frame = None

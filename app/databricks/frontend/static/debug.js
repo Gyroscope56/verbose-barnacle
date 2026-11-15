@@ -9,6 +9,10 @@ let lastPreview;
 let lastReport;
 let zones;
 let zoneSize;
+let demo = false;
+let startingManual = false;
+let manualId;
+let manualPinned = false;
 
 async function load(path, options) {
   const response = await fetch("/api/debug/" + path, {cache: "no-store", ...options});
@@ -49,11 +53,11 @@ function renderPreview(state) {
   renderZones();
 }
 
-function renderReport(report, receivedAt) {
+function renderReport(report, receivedAt, manual = false) {
   if (!report) return;
   el("inference").hidden = false;
   el("decision").textContent = report.decision;
-  const meta = [new Date(receivedAt).toLocaleTimeString(), `Frame ${report.frame_number}`,
+  const meta = [manual ? "Manual run" : null, new Date(receivedAt).toLocaleTimeString(), `Frame ${report.frame_number}`,
     report.zone, `${report.elapsed.toFixed(2)} s`, `Threshold ${report.threshold.toFixed(2)}`];
   if (report.detection) meta.push(`Score ${report.detection.score.toFixed(3)}`);
   el("inference-meta").textContent = meta.filter(Boolean).join(" · ");
@@ -84,6 +88,30 @@ const outcomes = {inside: "Checked in", exited: "Visit closed", unbooked: "No bo
   ambiguous: "Multiple plate matches", already_inside: "Already inside",
   denied: "Entry denied", not_inside: "No active visit"};
 
+function manualControls() {
+  const busy = startingManual || !!manualId;
+  el("demo-toggle").disabled = busy;
+  el("demo-toggle").setAttribute("aria-pressed", demo);
+  el("manual-run").hidden = !demo;
+  el("manual-run").disabled = paused || busy;
+  el("toggle").disabled = busy;
+  el("manual-status").hidden = !demo;
+}
+
+async function pollManual() {
+  try {
+    const {report, received_at} = await load("run/" + manualId);
+    if (!report) return;
+    renderReport(report, received_at, true);
+    manualPinned = true;
+    el("manual-status").textContent = "Manual run complete.";
+  } catch (error) {
+    el("manual-status").textContent = error.message;
+  }
+  manualId = null;
+  manualControls();
+}
+
 async function poll() {
   if (paused || document.hidden || pending) return;
   pending = true;
@@ -97,7 +125,8 @@ async function poll() {
       el("garage-result").textContent =
         `${plate} · ${zone} · ${outcomes[outcome] || outcome} · ${new Date(received_at).toLocaleTimeString()}`;
     }
-    if (state.report_id && state.report_id !== lastReport) {
+    if (manualId) await pollManual();
+    if (!manualPinned && !manualId && state.report_id && state.report_id !== lastReport) {
       const {report, received_at} = await load("report");
       renderReport(report, received_at);
       lastReport = report?.id;
@@ -115,11 +144,39 @@ el("toggle").addEventListener("click", () => {
   paused = !paused;
   clearTimeout(timer);
   el("toggle").textContent = paused ? "Resume preview" : "Pause preview";
+  manualControls();
   if (paused) el("live-status").textContent = "Paused";
   else poll();
+});
+el("demo-toggle").addEventListener("click", () => {
+  demo = !demo;
+  if (!demo && manualPinned) {
+    manualPinned = false;
+    lastReport = null;
+    el("inference").hidden = true;
+    el("decision").textContent = "Waiting for a motion-triggered read.";
+    el("inference-meta").textContent = "";
+  }
+  el("manual-status").textContent = "";
+  manualControls();
+});
+el("manual-run").addEventListener("click", async () => {
+  startingManual = true;
+  manualControls();
+  el("manual-status").textContent = "Waiting for a fresh burst from the UNO Q…";
+  try {
+    const result = await load("run", {method: "POST", headers: {"X-ParkSight-Setup": "1"}});
+    manualId = result.id;
+  } catch (error) {
+    el("manual-status").textContent = error.message;
+  } finally {
+    startingManual = false;
+    manualControls();
+  }
 });
 document.addEventListener("visibilitychange", () => {
   clearTimeout(timer);
   if (!document.hidden) poll();
 });
+manualControls();
 poll();
