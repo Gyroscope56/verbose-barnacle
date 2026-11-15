@@ -1,0 +1,40 @@
+"""Opt-in wiring for the existing FastAPI application."""
+
+import os
+
+import psycopg
+from camera_setup import camera_setup_router
+
+
+def install_camera_setup(app):
+    dsn = os.environ.get("PARKSIGHT_CAMERA_SETUP_DSN")
+    operators = {
+        value.strip().casefold()
+        for value in os.environ.get("PARKSIGHT_CAMERA_OPERATORS", "").split(",")
+        if value.strip()
+    }
+    key = os.environ.get("PARKSIGHT_CAMERA_DEVICE_KEY")
+    if not dsn or not operators or not key:
+        return False
+
+    def connect():
+        return psycopg.connect(
+            dsn, connect_timeout=4, options="-c statement_timeout=5000"
+        )
+
+    record_read = None
+    if os.environ.get("PARKSIGHT_GARAGE_ENABLED") == "1":
+        from garage_events import record_read
+
+    app.include_router(
+        camera_setup_router(
+            connect,
+            os.environ.get("PARKSIGHT_CAMERA_ID", "entrance-camera"),
+            operators,
+            key,
+            record_read,
+            debug_enabled=os.environ.get("PARKSIGHT_DEBUG_ENABLED") == "1",
+            stall_enabled=os.environ.get("PARKSIGHT_STALL_CALIBRATION_ENABLED") == "1",
+        )
+    )
+    return True

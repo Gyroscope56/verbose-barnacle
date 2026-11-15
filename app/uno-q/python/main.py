@@ -1,4 +1,4 @@
-"""ParkSight UNO Q: resilient camera, local dashboard, detector + OCR pipeline.
+"""ParkSight UNO Q: resilient camera, detector + OCR pipeline.
 
 Keep this file at <app>/python/main.py alongside log_dashboard.py.
 The models live at <app>/models/{detector,ocr}.onnx.
@@ -16,8 +16,9 @@ from time import monotonic
 import cv2
 import numpy as np
 from arduino.app_utils import App, Bridge
+from camera_setup_bridge import CameraSetupBridge
 from garage_sync import LakebaseIntegration
-from log_dashboard import LiveLogStore, configure_logging, start_web_server
+from log_dashboard import LiveLogStore, configure_logging
 from plate_crop import crop_quality, straighten_plate
 from plate_line_ocr import PlateLineRecognizer, normalize_plate
 from plate_state import guess_plate_state
@@ -58,7 +59,7 @@ CAMERA_RESOLUTION = (1280, 720)
 CAMERA_FPS = 15
 MOTION_ROI = (0.15, 0.25, 0.85, 0.90)
 MOTION_INTERVAL = 0.2
-FOREGROUND_FRACTION = 0.05
+FOREGROUND_FRACTION = 0.03
 WARMUP_SECONDS = 2.0
 QUIET_SECONDS = 1.0
 BURST_FRAMES = 6
@@ -75,6 +76,7 @@ _detector = None
 _ocr = None
 _models_failed = False
 _lakebase = None
+_camera_setup = None
 
 
 def get_models():
@@ -102,7 +104,7 @@ def get_models():
         return _detector, _ocr
     except Exception:
         _models_failed = True
-        LOG.exception("ONNX models unavailable; motion detection and dashboard will continue")
+        LOG.exception("ONNX models unavailable; motion detection will continue")
         return None
 
 
@@ -194,22 +196,23 @@ def read_frame(index, frame, box, ocr):
     return corrected, details
 
 
-def recognize_burst(frames):
+def recognize_burst(frames, zone=None, region=None, garage_enabled=False, *, manual_id=None):
     STORE.increment("ocr_attempts")
-    LOG.info("Recognition triggered on %d frame(s)", len(frames))
-    models = get_models()
-    if models is None:
-        LOG.info("No plate recognized")
-        return
-
-    detector, ocr = models
+    LOG.info("Recognition triggered on %d frame(s) in %s", len(frames), zone or "default view")
     notes = []
     readings = []
+    detections = {}
     decision = "No reliable read"
     started = monotonic()
     try:
+        models = get_models()
+        if models is None:
+            decision = "Detector or OCR model unavailable"
+            LOG.warning("%s", decision)
+            return
+        detector, ocr = models
         for index, frame in enumerate(frames):
-            box, score = detect_plate(frame, detector)
+            box, score = detect_plate_in_region(frame, detector, region)
             if box is None:
                 best = "unavailable" if score is None else f"{score:.3f}"
                 notes.append(f"No usable plate box. Best raw detector score {best}.")
@@ -220,6 +223,7 @@ def recognize_burst(frames):
                 notes.append(f"{detection} Rejected because the box covers almost the entire frame.")
                 continue
             reading, details = read_frame(index, frame, box, ocr)
+            detections[index] = {"box": box, "score": score}
             readings.append(reading)
             notes.append(f"{detection} {details}.")
 
@@ -236,6 +240,8 @@ def recognize_burst(frames):
                     LOG.exception("Issuing state OCR failed; keeping the confirmed plate read")
                 STORE.increment("plate_reads")
                 STORE.set(last_plate=plate, last_plate_state=state)
+                if garage_enabled and _camera_setup is not None:
+                    _camera_setup.enqueue_garage_read(zone, plate)
                 decision = (f"Confirmed {plate} on {count} of {len(frames)} frames. "
                             f"Issuing state guess: {state or 'Unknown'}")
         LOG.info("%s", decision)
@@ -246,32 +252,72 @@ def recognize_burst(frames):
         if frames:
             selected = max(readings, key=lambda reading: reading.quality, default=None)
             index = selected.index if selected else len(frames) - 1
+            elapsed = monotonic() - started
+            ocr_input = selected.ocr_input if selected else None
+            plate_crop = selected.crop if selected else None
+            if _camera_setup is not None:
+                _camera_setup.offer_debug_report({
+                    "frame_number": index + 1, "zone": zone, "elapsed": elapsed,
+                    "threshold": DETECTOR_THRESHOLD, "decision": decision,
+                    "notes": notes, "detection": detections.get(index),
+                }, frames[index], plate_crop, ocr_input, manual_id=manual_id)
             try:
                 save_debug_report(
-                    DEBUG_REPORT, frames[index], selected.ocr_input if selected else None,
-                    notes, DETECTOR_THRESHOLD, monotonic() - started, decision=decision,
-                    frame_number=index + 1, plate_crop=selected.crop if selected else None,
+                    DEBUG_REPORT, frames[index], ocr_input, notes, DETECTOR_THRESHOLD, elapsed,
+                    decision=decision, frame_number=index + 1, plate_crop=plate_crop,
                 )
             except (OSError, cv2.error) as exc:
                 LOG.warning("Could not save recognition debug report: %s", exc)
 
 
-def motion_fraction(frame, background):
-    height, width = frame.shape[:2]
-    left, top, right, bottom = MOTION_ROI
-    roi = frame[int(top * height):int(bottom * height),
-                int(left * width):int(right * width)]
+def detect_plate_in_region(frame, detector, region):
+    if region is None:
+        return detect_plate(frame, detector)
+    left, top, right, bottom = region
+    box, score = detect_plate(frame[top:bottom, left:right], detector)
+    if box is None:
+        return None, score
+    x, y, width, height = box
+    return [left + x, top + y, width, height], score
+
+
+def motion_fraction(frame, background, region):
+    left, top, right, bottom = region
+    roi = frame[top:bottom, left:right]
     small = cv2.resize(roi, (160, 90), interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     mask = background.apply(cv2.GaussianBlur(gray, (5, 5), 0))
     return cv2.countNonZero(mask) / mask.size
 
 
+def separate_regions(regions):
+    if len(regions) != 2:
+        return False
+    (_, a), (_, b) = regions
+    return min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1])
+
+
 def poll_stall(last_stall):
+    if _camera_setup is not None:
+        def read_mm():
+            try:
+                return int(Bridge.call("stall_distance_mm", timeout=0.25))
+            except (TypeError, *BRIDGE_ERRORS):
+                return -1
+
+        def configure(occupied, clear):
+            try:
+                return Bridge.call("stall_set_thresholds", occupied, clear, timeout=0.25) is True
+            except BRIDGE_ERRORS:
+                return False
+
+        _camera_setup.stall_sensor.tick(read_mm, configure)
     try:
         stall = str(Bridge.call("stall_state", timeout=0.25))
     except BRIDGE_ERRORS:
         stall = "unknown (Bridge unavailable)"
+    if _camera_setup is not None:
+        _camera_setup.stall_sensor.observe(stall)
     if _lakebase is not None:
         _lakebase.sync.observe(stall)
     if stall != last_stall:
@@ -281,12 +327,14 @@ def poll_stall(last_stall):
 
 
 def run_camera(camera, worker):
-    background = cv2.createBackgroundSubtractorMOG2(
-        history=100, varThreshold=25, detectShadows=False)
-    warmup_until = monotonic() + WARMUP_SECONDS
+    active_regions = ()
+    backgrounds = {}
+    motion_zone = None
+    burst_zone = None
+    warmup_until = 0.0
     next_motion_sample = 0.0
     next_stall_poll = 0.0
-    last_motion = warmup_until
+    last_motion = 0.0
     last_stall = None
     consecutive_motion = 0
     armed = True
@@ -301,7 +349,16 @@ def run_camera(camera, worker):
             frame = camera.capture()
             if frame is None:
                 raise RuntimeError("USB camera stopped returning frames")
+            if _camera_setup is not None:
+                _camera_setup.offer(frame)
             now = monotonic()
+            if _camera_setup is not None:
+                manual = _camera_setup.take_manual_burst(
+                    frame, now, BURST_FRAMES, MOTION_INTERVAL
+                )
+                if manual is not None:
+                    manual_id, frames = manual
+                    worker.submit(recognize_burst, frames, manual_id=manual_id)
             if ocr_job is not None and ocr_job.done():
                 ocr_job.result()
                 ocr_job = None
@@ -311,20 +368,47 @@ def run_camera(camera, worker):
             if now < next_motion_sample:
                 continue
             next_motion_sample = now + MOTION_INTERVAL
-            moving = motion_fraction(frame, background) >= FOREGROUND_FRACTION
+            height, width = frame.shape[:2]
+            calibrated = _camera_setup.regions(width, height) if _camera_setup else ()
+            if calibrated:
+                regions = calibrated
+            else:
+                left, top, right, bottom = MOTION_ROI
+                regions = (("approach", (int(left * width), int(top * height),
+                                         int(right * width), int(bottom * height))),)
+            if regions != active_regions:
+                active_regions = regions
+                backgrounds = {
+                    name: cv2.createBackgroundSubtractorMOG2(
+                        history=100, varThreshold=25, detectShadows=False)
+                    for name, _ in regions
+                }
+                warmup_until = now + WARMUP_SECONDS
+                last_motion = warmup_until
+                consecutive_motion = 0
+                motion_zone = None
+                armed = True
+                burst = []
+                LOG.info("Camera detection regions: %s", "calibrated entry and exit" if calibrated else "default approach")
+
+            samples = [(motion_fraction(frame, backgrounds[name], region), name)
+                       for name, region in regions]
+            fraction, zone = max(samples, key=lambda sample: sample[0])
             if now < warmup_until:
                 continue
-            if moving:
+            if fraction >= FOREGROUND_FRACTION:
                 last_motion = now
-                consecutive_motion += 1
+                consecutive_motion = consecutive_motion + 1 if zone == motion_zone else 1
+                motion_zone = zone
             else:
                 consecutive_motion = 0
                 if now - last_motion >= QUIET_SECONDS and ocr_job is None:
                     armed = True
             if armed and consecutive_motion >= 2:
                 armed = False
+                burst_zone = zone if calibrated else None
                 STORE.increment("motion_events")
-                LOG.info("Approach-area motion detected; collecting %d frames", BURST_FRAMES)
+                LOG.info("Motion detected in %s; collecting %d frames", zone, BURST_FRAMES)
                 burst.append(frame.copy())
                 try:
                     Bridge.notify("signal_camera_motion")
@@ -334,14 +418,17 @@ def run_camera(camera, worker):
                 burst.append(frame.copy())
             if len(burst) == BURST_FRAMES:
                 if ocr_job is None:
-                    ocr_job = worker.submit(recognize_burst, burst)
+                    region = dict(active_regions).get(burst_zone)
+                    ocr_job = worker.submit(
+                        recognize_burst, burst, burst_zone, region, separate_regions(active_regions)
+                    )
                 burst = []
     finally:
         STORE.set(camera="waiting for camera")
 
 
 def run_service():
-    """Remain alive and keep the dashboard up even with no webcam attached."""
+    """Keep polling the MCU and retry camera discovery while the webcam is unavailable."""
     last_stall = None
     failures = 0
     with ThreadPoolExecutor(max_workers=1) as worker:
@@ -354,8 +441,8 @@ def run_service():
                 failures += 1
                 STORE.set(camera="waiting for camera")
                 if failures == 1 or failures % 6 == 0:
-                    LOG.warning("Camera unavailable (%s); retrying every %ds. "
-                                "Dashboard stays online.", exc, CAMERA_RETRY_SECONDS)
+                    LOG.warning("Camera unavailable (%s); retrying every %ds",
+                                exc, CAMERA_RETRY_SECONDS)
                 # Keep polling the MCU sensor while the webcam is unplugged.
                 end = monotonic() + CAMERA_RETRY_SECONDS
                 while monotonic() < end:
@@ -364,26 +451,26 @@ def run_service():
 
 
 def main():
-    global _lakebase
+    global _lakebase, _camera_setup
     app_dir = MODEL_DIR.parent
     _lakebase = LakebaseIntegration.load(
         app_dir / "lakebase.json", app_dir / ".cache" / "lakebase-occupancy.json", STORE, LOG
     )
-    try:
-        start_web_server(STORE, LOG, debug_report=DEBUG_REPORT, lakebase=_lakebase)
-    except OSError:
-        LOG.exception("Could not bind dashboard to port 5001")
-    LOG.info("ParkSight starting; Linux NetworkManager manages the Wi-Fi hotspot")
+    _camera_setup = CameraSetupBridge.load(app_dir / "camera-setup.json", LOG)
+    LOG.info("ParkSight starting")
     LOG.info("Models directory: %s", MODEL_DIR)
     get_models()  # Log ONNX Runtime/model readiness at startup without crashing.
-    LOG.info("Web dashboard remains available while the camera is disconnected")
     if _lakebase is not None:
         _lakebase.sync.start()
+    if _camera_setup is not None:
+        _camera_setup.start()
     try:
         App.run(run_service)
     finally:
         if _lakebase is not None:
             _lakebase.sync.stop()
+        if _camera_setup is not None:
+            _camera_setup.stop()
 
 
 if __name__ == "__main__":

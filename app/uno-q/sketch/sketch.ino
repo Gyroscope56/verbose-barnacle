@@ -1,8 +1,8 @@
 #include <Arduino_Modulino.h>
 #include <Arduino_RouterBridge.h>
 
-constexpr int occupiedBelowMm = 400;
-constexpr int clearAboveMm = 550;
+int occupiedBelowMm = 400;
+int clearAboveMm = 550;
 constexpr unsigned long confirmMs = 500;
 constexpr unsigned long invalidTimeoutMs = 1000;
 constexpr int depthChangeMm = 80;
@@ -16,6 +16,7 @@ StallState stall = StallState::Unknown;
 StallState pending = StallState::Unknown;
 unsigned long pendingSince = 0;
 unsigned long lastValidAt = 0;
+int lastDistanceMm = -1;
 float depthReferenceMm = 0;
 uint8_t depthChangeSamples = 0;
 unsigned long depthPulseAt = 0;
@@ -54,6 +55,23 @@ String stallState() {
   }
 }
 
+int stallDistanceMm() {
+  return millis() - lastValidAt < invalidTimeoutMs ? lastDistanceMm : -1;
+}
+
+bool setStallThresholds(int occupied, int clear) {
+  if (occupied < 1 || clear > 1200 || occupied >= clear) {
+    return false;
+  }
+  if (occupied != occupiedBelowMm || clear != clearAboveMm) {
+    occupiedBelowMm = occupied;
+    clearAboveMm = clear;
+    pending = StallState::Unknown;
+    stall = StallState::Unknown;
+  }
+  return true;
+}
+
 void setup() {
   pinMode(LED3_G, OUTPUT);
   pinMode(LED3_B, OUTPUT);
@@ -63,6 +81,8 @@ void setup() {
   distanceReady = distance.begin();
   Bridge.begin();
   Bridge.provide_safe("stall_state", stallState);
+  Bridge.provide_safe("stall_distance_mm", stallDistanceMm);
+  Bridge.provide_safe("stall_set_thresholds", setStallThresholds);
   Bridge.provide_safe("signal_camera_motion", signalCameraMotion);
 }
 
@@ -79,6 +99,7 @@ void loop() {
     }
   } else {
     lastValidAt = now;
+    lastDistanceMm = mm <= 1200 ? static_cast<int>(mm + 0.5f) : -1;
     checkDepthChange(mm, now);
     StallState observed = StallState::Unknown;
     if (mm < occupiedBelowMm) {
