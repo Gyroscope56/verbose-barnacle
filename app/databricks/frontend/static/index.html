@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Noto+Serif:ital,wght@0,400;0,600;1,400&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/setup.js" defer></script>
+  <script src="/static/stall.js" defer></script>
 </head>
 <body>
   <header class="masthead">
@@ -126,6 +127,28 @@
     <div class="status-container">
       <p id="status" role="status" aria-live="polite">Loading setup…</p>
     </div>
+
+    <section class="stall-calibration" aria-labelledby="stall-title">
+      <h2 id="stall-title">Distance sensor calibration</h2>
+      <p class="lead">Capture each reading with the sensor in its installed position. Keep the stall empty for the first reading and place the vehicle or demo target where it will normally stop for the second.</p>
+      <div class="stall-samples">
+        <div>
+          <h3>Empty stall</h3>
+          <p id="stall-clear-value">No sample</p>
+          <button id="stall-clear" class="quiet-action" type="button" disabled>Sample empty stall</button>
+        </div>
+        <div>
+          <h3>Occupied stall</h3>
+          <p id="stall-occupied-value">No sample</p>
+          <button id="stall-occupied" class="quiet-action" type="button" disabled>Sample occupied stall</button>
+        </div>
+      </div>
+      <div class="stall-actions">
+        <button id="stall-apply" class="primary" type="button" disabled>Apply sensor calibration</button>
+        <p id="stall-status" role="status">Loading sensor setup…</p>
+      </div>
+      <p id="stall-thresholds"></p>
+    </section>
   </main>
 </body>
 </html>

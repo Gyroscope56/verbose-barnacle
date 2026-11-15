@@ -34,6 +34,7 @@ def install_camera_setup(app):
             key,
             record_read,
             debug_enabled=os.environ.get("PARKSIGHT_DEBUG_ENABLED") == "1",
+            stall_enabled=os.environ.get("PARKSIGHT_STALL_CALIBRATION_ENABLED") == "1",
         )
     )
     return True

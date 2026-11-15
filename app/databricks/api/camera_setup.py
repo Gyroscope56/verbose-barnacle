@@ -48,7 +48,7 @@ class GarageRead(BaseModel):
 
 
 def camera_setup_router(connect, camera_id, operators, device_key, record_read=None,
-                        debug_enabled=False):
+                        debug_enabled=False, stall_enabled=False):
     """Connect is the existing backend's PostgreSQL connection factory."""
     if not operators or not device_key:
         raise ValueError("Camera setup requires allowed operators and a device key")
@@ -74,6 +74,15 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
 
         register_debug_routes(router, connect, camera_id, require_operator, require_device,
                               require_setup_action, record_read is not None)
+
+    if stall_enabled:
+        if __package__:
+            from .stall_calibration import register_stall_routes
+        else:
+            from stall_calibration import register_stall_routes
+
+        register_stall_routes(router, connect, camera_id, require_operator, require_device,
+                              require_setup_action)
 
     def compatible_calibration(calibration, width, height):
         if calibration is not None and width and height:
@@ -184,7 +193,13 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
                    FROM parksight_camera_debug WHERE camera_id = %s""",
                 (camera_id,),
             ).fetchone() if debug_enabled else None
+            stall = conn.execute(
+                """SELECT CASE WHEN sample_until > now() THEN sample_id END, settings
+                   FROM parksight_stall_calibration WHERE camera_id = %s""",
+                (camera_id,),
+            ).fetchone() if stall_enabled else None
         debug_requested, manual_id = debug or (False, None)
+        stall_sample_id, stall_settings = stall or (None, None)
         request_id, calibration, width, height = row or (None, None, None, None)
         return {
             "id": request_id,
@@ -192,6 +207,9 @@ def camera_setup_router(connect, camera_id, operators, device_key, record_read=N
             "garage_enabled": record_read is not None,
             "debug_requested": debug_requested,
             "manual_id": manual_id,
+            "stall_sample_id": stall_sample_id,
+            "stall_settings": stall_settings,
+            "stall_available": stall_enabled,
         }
 
     if record_read is not None:

@@ -13,6 +13,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID, uuid4
 
 import cv2
+from stall_sensor import StallSensor
 
 
 class NoRedirects(HTTPRedirectHandler):
@@ -143,6 +144,8 @@ class CameraSetupBridge:
         self.request_id = None
         self.frame = None
         self.layout_path = layout_path
+        self.stall_sensor = StallSensor(layout_path.with_name("stall-thresholds.json"), log)
+        self.stall_available = False
         self.calibration = None
         self.garage_enabled = False
         self.garage_retry_at = 0.0
@@ -309,6 +312,8 @@ class CameraSetupBridge:
 
     def poll(self):
         state = self.client.setup_state()
+        self.stall_available = state.get("stall_available") is True
+        self.stall_sensor.update(state.get("stall_sample_id"), state.get("stall_settings"))
         request_id = UUID(state["id"]) if state["id"] else None
         self.garage_enabled = state.get("garage_enabled") is True
         if "calibration" in state:
@@ -343,6 +348,8 @@ class CameraSetupBridge:
                 self.poll()
                 self.sync_garage_read()
                 self.sync_debug()
+                if self.stall_available:
+                    self.stall_sensor.sync(self.client)
                 wait = 0.5 if self.debug_requested else 1
             except (URLError, OSError, ValueError, KeyError, TypeError, cv2.error) as error:
                 if wait != 5:

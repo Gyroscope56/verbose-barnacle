@@ -130,6 +130,18 @@ def create_app(upstream=requests.request):
     def save():
         return forward("/api/camera-setup/calibration")
 
+    @app.get("/api/camera-setup/stall")
+    def stall_status():
+        return forward("/api/camera-setup/stall")
+
+    @app.post("/api/camera-setup/stall/sample/<any(clear,occupied):kind>")
+    def stall_sample(kind):
+        return forward(f"/api/camera-setup/stall/sample/{kind}")
+
+    @app.post("/api/camera-setup/stall/apply")
+    def stall_apply():
+        return forward("/api/camera-setup/stall/apply")
+
     return app
 
 

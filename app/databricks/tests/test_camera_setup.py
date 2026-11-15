@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import unittest
 from base64 import b64decode, b64encode
 from os import environ
@@ -19,6 +20,7 @@ from app.databricks.frontend.app import create_app
 
 ROOT = Path(__file__).resolve().parents[3]
 BRIDGE = ROOT / "app" / "uno-q" / "python" / "camera_setup_bridge.py"
+sys.path.insert(0, str(BRIDGE.parent))
 spec = importlib.util.spec_from_file_location("camera_setup_bridge", BRIDGE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -110,6 +112,7 @@ class CaptureTest(unittest.TestCase):
             conn.execute((ROOT / "app/databricks/api/schema.sql").read_text())
             conn.execute((ROOT / "app/databricks/api/garage_schema.sql").read_text())
             conn.execute((ROOT / "app/databricks/api/debug_schema.sql").read_text())
+            conn.execute((ROOT / "app/databricks/api/stall_schema.sql").read_text())
             conn.execute("""
                 CREATE TABLE g_sessions (
                     license_plate text PRIMARY KEY, has_entrance_ticket boolean NOT NULL,
@@ -135,6 +138,7 @@ class CaptureTest(unittest.TestCase):
             camera_setup_router(
                 self.connect, "entrance-camera", {"operator"}, "device-key", record_read,
                 debug_enabled=True,
+                stall_enabled=True,
             )
         )
         return TestClient(app)
@@ -402,3 +406,50 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(self.api.get(result_url, headers=OPERATOR).json()["report"], payload)
         self.assertIsNone(self.api.get(base + "/debug/report", headers=OPERATOR).json()["report"])
         self.assertIsNone(self.api.get(base + "/device/request", headers=DEVICE).json()["manual_id"])
+
+    def test_stall_calibration_samples_and_applies_new_thresholds(self):
+        base = "/api/camera-setup"
+        stall = base + "/stall"
+        command = base + "/device/stall"
+        self.assertEqual(self.api.get(stall, headers=DEVICE).status_code, 403)
+        self.assertEqual(self.api.post(stall + "/apply", headers=OPERATOR).status_code, 409)
+        with TemporaryDirectory() as directory:
+            cache = Path(directory) / "stall.json"
+            sensor = module.StallSensor(cache, Mock())
+            for kind, readings, expected in (
+                ("clear", [798, 801, 800, -1, 800], 800),
+                ("occupied", [297, 300, 304, 300, 302], 300),
+            ):
+                result = self.api.post(stall + "/sample/" + kind, headers=OPERATOR)
+                self.assertEqual(result.status_code, 202)
+                request_id = result.json()["id"]
+                state = self.api.get(base + "/device/request", headers=DEVICE).json()
+                self.assertEqual(state["stall_sample_id"], request_id)
+                self.assertEqual(self.api.post(stall + "/sample/" + kind, headers=OPERATOR).status_code, 409)
+                sensor.update(request_id, None)
+                for reading in readings:
+                    sensor.tick(lambda: reading, Mock())
+                payload = sensor.result[1]
+                self.assertEqual(payload, {"distance_mm": expected, "error": None})
+                self.assertEqual(
+                    self.api.put(command + "/sample/" + request_id, json=payload, headers=DEVICE).status_code,
+                    204,
+                )
+            settings = self.api.post(stall + "/apply", headers=OPERATOR).json()
+            self.assertEqual(settings["occupied_below_mm"], 466)
+            self.assertEqual(settings["clear_above_mm"], 634)
+            self.assertFalse(self.api.get(stall, headers=OPERATOR).json()["applied"])
+            sensor.update(None, settings)
+            setter = Mock(return_value=True)
+            sensor.tick(Mock(), setter)
+            setter.assert_called_once_with(466, 634)
+            self.assertTrue(cache.is_file())
+            self.assertEqual(
+                self.api.put(command + "/applied/" + sensor.applied, headers=DEVICE).status_code,
+                204,
+            )
+            self.assertTrue(self.api.get(stall, headers=OPERATOR).json()["applied"])
+            restarted = module.StallSensor(cache, Mock())
+            setter.reset_mock()
+            restarted.tick(Mock(), setter)
+            setter.assert_called_once_with(466, 634)

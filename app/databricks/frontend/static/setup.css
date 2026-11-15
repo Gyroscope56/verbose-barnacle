@@ -731,3 +731,20 @@ button.primary:active:not(:disabled) {
     scroll-behavior: auto !important;
   }
 }
+
+.stall-calibration {
+  margin-top: 2rem;
+  border-top: 2px solid var(--primary);
+  padding-top: 1.25rem;
+}
+.stall-calibration h2 { font: 600 var(--step-head) var(--font-serif); }
+.stall-calibration .lead { max-width: 62ch; margin: .4rem 0 1rem; }
+.stall-samples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gutter); }
+.stall-samples > div { padding: 1rem; border: 1px solid var(--border-subtle); background: var(--surface-container-lowest); }
+.stall-samples h3 { font-size: var(--step-body); }
+.stall-samples p { font-family: var(--font-mono); margin: .45rem 0; }
+.stall-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin-top: 1rem; }
+#stall-thresholds { margin-top: .5rem; }
+@media (max-width: 520px) {
+  .stall-samples { grid-template-columns: minmax(0, 1fr); }
+}

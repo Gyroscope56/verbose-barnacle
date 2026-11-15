@@ -298,6 +298,20 @@ def separate_regions(regions):
 
 
 def poll_stall(last_stall):
+    if _camera_setup is not None:
+        def read_mm():
+            try:
+                return int(Bridge.call("stall_distance_mm", timeout=0.25))
+            except (TypeError, *BRIDGE_ERRORS):
+                return -1
+
+        def configure(occupied, clear):
+            try:
+                return Bridge.call("stall_set_thresholds", occupied, clear, timeout=0.25) is True
+            except BRIDGE_ERRORS:
+                return False
+
+        _camera_setup.stall_sensor.tick(read_mm, configure)
     try:
         stall = str(Bridge.call("stall_state", timeout=0.25))
     except BRIDGE_ERRORS:
