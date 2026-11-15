@@ -153,8 +153,8 @@ def register_stall_routes(router, connect, camera_id, require_operator, require_
                 raise HTTPException(409, "Capture an empty and an occupied sample first.")
             clear, occupied, _ = row
             gap = clear - occupied
-            if gap < 100:
-                raise HTTPException(422, "The empty sample must be at least 100 mm farther away.")
+            if gap < 20:
+                raise HTTPException(422, "The empty sample must be at least 20 mm farther away.")
             settings = {
                 "clear_mm": clear, "occupied_mm": occupied, "revision": str(uuid4()),
                 "occupied_below_mm": occupied + gap // 3,
