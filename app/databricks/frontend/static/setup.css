@@ -760,3 +760,38 @@ button.primary:active:not(:disabled) {
 @media (max-width: 520px) {
   .stall-samples { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ==========================================================================
+   Distance sensor calibration · refined
+   ========================================================================== */
+.stall-calibration { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--outline-variant); }
+.stall-calibration h2 { font-size: var(--step-display); letter-spacing: -.01em; }
+.stall-calibration .lead { color: var(--on-surface-variant); margin: .6rem 0 1.75rem; }
+.stall-samples > div {
+  position: relative; padding: 1.4rem 1.5rem 1.25rem; border-radius: var(--radius-xl);
+  border: 1px solid var(--border-subtle); box-shadow: var(--shadow-panel);
+}
+.stall-samples h3 {
+  margin: 0; font: 600 var(--step-small) var(--font-label); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+.stall-samples p {
+  margin: .65rem 0 1rem; font: 500 2.25rem/1.1 var(--font-mono); letter-spacing: -.02em; color: var(--on-surface);
+  font-variant-numeric: tabular-nums;
+}
+#stall-clear-value:not(:empty), #stall-occupied-value:not(:empty) { min-height: 2.5rem; }
+.stall-samples .quiet-action {
+  border: 1px solid var(--outline-variant); border-radius: var(--radius-full); padding: .55rem 1rem; color: var(--primary);
+  background: var(--surface-container-lowest);
+}
+.stall-actions { margin-top: 1.5rem; }
+#stall-apply { border-radius: var(--radius-full); padding-inline: 1.25rem; }
+#stall-status { color: var(--success); font-weight: 500; }
+#stall-thresholds { font: var(--step-small) var(--font-mono); color: var(--on-surface-variant); }
+.stall-spot { margin-top: 2rem; padding-top: 1.5rem; }
+#stall-spot { border-radius: var(--radius-lg); padding: .6rem .8rem; min-width: 14rem; }
+#stall-assign { border: 1px solid var(--outline-variant); border-radius: var(--radius-full); }
+#stall-occupancy {
+  display: inline-block; margin-top: 1rem; padding: .55rem .9rem; border-radius: var(--radius-lg);
+  background: var(--surface-container-low); font: var(--step-small) var(--font-mono); color: var(--on-surface);
+}

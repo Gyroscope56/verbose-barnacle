@@ -21,36 +21,62 @@ PAGE = r'''<!doctype html>
 <meta name="theme-color" content="#0a121c">
 <title>ParkSight · Live monitor</title>
 <style>
-:root { color-scheme: dark; --bg:#0a121c; --panel:#131f2c; --border:#293c4c; --muted:#9bb0bd; --accent:#53dbc8; --text:#ecf6fb }
+:root { color-scheme: dark; --bg:#0b0d10; --panel:#15181d; --panel-2:#1b1f25; --border:rgba(255,255,255,.08);
+ --muted:#8e98a4; --text:#f2f5f8; --accent:#5fe0c4; --accent-soft:rgba(95,224,196,.12); --warn:#ffcf7a; --err:#ff8a9b;
+ --radius:18px }
 * { box-sizing: border-box }
-body { background: radial-gradient(circle at 95% 0%,#122f3c 0%,var(--bg) 55%); color:var(--text); font: 15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0 }
-main { max-width:1000px; padding:26px 18px 50px; margin:auto }
-header { display:flex; flex-wrap:wrap; justify-content:space-between; gap:14px; align-items:center; margin-bottom:24px }
-h1 { font-size:28px; margin:0; letter-spacing:-.5px } h1 b {color:var(--accent)}
-small, .muted { color:var(--muted) } .pill { padding:5px 12px; border-radius:20px; background:#1a3f3e; color:#a4f5d8; font-weight:600 }
-.grid {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:22px}
-.panel,.metric {border:1px solid var(--border); border-radius:14px; background:var(--panel)}
-.metric {padding:15px 18px}.metric span { display:block; color:var(--muted); font-size:13px; margin-bottom:5px }.metric strong { font-size:23px; overflow-wrap:anywhere }
-.panel { overflow:hidden }.toolbar {display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:15px 17px; border-bottom:1px solid var(--border)}
-.toolbar h2 {margin:0; font-size:18px} .actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px }
-#garage {margin-bottom:22px}
-#garage-form {padding:15px 17px; display:grid; gap:12px}
+body { background:radial-gradient(1200px 600px at 85% -10%,#12302e 0%,rgba(18,48,46,0) 60%),var(--bg); color:var(--text);
+ font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif; margin:0; -webkit-font-smoothing:antialiased; min-height:100vh }
+main { max-width:1080px; padding:40px 24px 56px; margin:auto }
+header { display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px; align-items:center; margin-bottom:28px }
+h1 { font:600 30px/1.1 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif; margin:0 0 6px; letter-spacing:-.6px } h1 b {color:var(--accent); font-weight:600}
+small, .muted { color:var(--muted) }
+.pill { display:inline-flex; align-items:center; gap:8px; padding:7px 14px 7px 12px; border-radius:999px; background:var(--accent-soft);
+ color:var(--accent); font-weight:600; font-size:13px; border:1px solid rgba(95,224,196,.22) }
+.pill::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; box-shadow:0 0 0 4px rgba(95,224,196,.18) }
+.pill.down { color:var(--err); background:rgba(255,138,155,.1); border-color:rgba(255,138,155,.25) }
+.grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px}
+.panel,.metric {border:1px solid var(--border); border-radius:var(--radius); background:linear-gradient(180deg,var(--panel-2),var(--panel))}
+.metric {padding:18px 20px; min-height:104px}
+.metric span { display:block; color:var(--muted); font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px }
+.metric strong { font:600 24px/1.15 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif; letter-spacing:-.3px; overflow-wrap:anywhere; text-transform:capitalize }
+.metric.hero { grid-column:span 2; display:flex; flex-direction:column; justify-content:space-between }
+.metric.hero strong { font-size:40px; letter-spacing:-1px }
+.metric.hero strong[data-state="occupied"] { color:var(--accent) }
+.metric.plate strong { font-family:ui-monospace,"SF Mono",Menlo,monospace; text-transform:none; letter-spacing:.5px }
+.panel { overflow:hidden }
+.toolbar {display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border)}
+.toolbar h2 {margin:0; font-size:17px; font-weight:600; letter-spacing:-.2px} .actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px }
+#garage {margin-bottom:20px}
+#garage-form {padding:18px 20px 20px; display:grid; gap:16px}
 #garage-form[hidden] {display:none}
-#garage-form label { display:grid; gap:4px; min-width: min(100%, 220px) }
-#garage-form input {font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:6px}
-#garage-result { margin:0; min-height:1.5em }
-button {color:var(--text); background:#264354; border:1px solid #426679; border-radius:8px; padding:7px 11px; cursor:pointer}
-button:hover {background:#345669}.switch {cursor:pointer; color:var(--muted); font-size:13px}
-pre {font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; padding:13px 17px; min-height:280px; max-height:58vh; overflow:auto}
-.entry {margin:0 0 5px} .ts {color:#8ea4b3} .lvl { color:#80d8ca } .warn {color:#ffcf82} .err {color:#ff91a3}
-footer {margin-top:14px; color:var(--muted); font-size:12px}
-@media(max-width:620px) {.grid {grid-template-columns:1fr 1fr} .metric strong {font-size:20px} h1 {font-size:25px}}
+#garage-form label { display:grid; gap:6px; min-width:min(100%,240px); color:var(--muted); font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase }
+#garage-form input {font:500 16px/1.2 -apple-system,BlinkMacSystemFont,sans-serif; color:var(--text); background:#0f1216; padding:11px 13px;
+ border:1px solid var(--border); border-radius:10px; outline:none; text-transform:none; letter-spacing:0; transition:border-color .15s, box-shadow .15s}
+#garage-key { font-family:ui-monospace,"SF Mono",Menlo,monospace !important; letter-spacing:.08em !important }
+#garage-form input:focus {border-color:rgba(95,224,196,.6); box-shadow:0 0 0 4px rgba(95,224,196,.14)}
+#garage-result { margin:0; min-height:1.5em; color:var(--text); font-weight:500 }
+#garage-result:not(:empty)::before { content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:9px; vertical-align:2px }
+button {font:500 14px/1 -apple-system,BlinkMacSystemFont,sans-serif; color:var(--text); background:rgba(255,255,255,.06); border:1px solid var(--border);
+ border-radius:999px; padding:9px 16px; cursor:pointer; transition:background .15s}
+button:hover {background:rgba(255,255,255,.12)}
+button[value="check"] {background:var(--accent); color:#06231d; border-color:transparent; font-weight:600}
+button[value="check"]:hover {background:#7ce9d1}
+button:disabled {opacity:.5; cursor:default}
+.switch {cursor:pointer; color:var(--muted); font-size:13px}
+.toolbar a { color:var(--muted); font-size:13px; text-decoration:none } .toolbar a:hover { color:var(--text) }
+pre {font:12.5px/1.75 ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace; margin:0; white-space:pre-wrap; overflow-wrap:anywhere;
+ padding:14px 20px; min-height:280px; max-height:58vh; overflow:auto; color:#d4dbe2}
+pre .ts {color:#5d6873} pre .lvl {display:inline-block; width:5.5em; color:var(--accent)} pre .lvl.WARNING {color:var(--warn)} pre .lvl.ERROR {color:var(--err)}
+pre .WARNING-line .msg {color:#ffe2ad}
+footer {margin-top:16px; color:#6b7580; font-size:12px}
+@media(max-width:760px) {.grid {grid-template-columns:1fr 1fr} .metric.hero strong {font-size:32px} .metric strong {font-size:20px} h1 {font-size:26px}}
 </style></head><body><main>
 <header><div><h1>Park<b>Sight</b></h1><small>UNO Q · Local monitoring, no internet required</small></div><span id="connection" class="pill">Connecting…</span></header>
 <section class="grid" aria-label="Live status">
-<div class="metric"><span>Parking stall</span><strong id="stall">—</strong></div>
+<div class="metric hero"><span>Parking stall</span><strong id="stall">—</strong></div>
 <div class="metric"><span>Camera</span><strong id="camera">—</strong></div>
-<div class="metric"><span>Last plate</span><strong id="plate">—</strong></div>
+<div class="metric plate"><span>Last plate</span><strong id="plate">—</strong></div>
 <div class="metric"><span>Issuing state (guess)</span><strong id="plate-state">—</strong></div>
 <div class="metric"><span>Motion triggers</span><strong id="motion">0</strong></div>
 <div class="metric"><span>OCR attempts</span><strong id="ocr">0</strong></div>
@@ -85,7 +111,19 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
  let prefilledPlate = null;
  const fmt = n => String(n).padStart(2,'0');
  const formatTime = iso => { const d = new Date(iso); return `${fmt(d.getHours())}:${fmt(d.getMinutes())}:${fmt(d.getSeconds())}`; };
- function render() { log.textContent = lines.join('\n') || 'No logs yet'; if ($('autoscroll').checked) log.scrollTop=log.scrollHeight; }
+ function render() {
+  if (!lines.length) { log.textContent = 'No logs yet'; }
+  else log.replaceChildren(...lines.map(text => {
+   const m = /^(\[[^\]]*\]) (\S+)\s+([\s\S]*)$/.exec(text); const row = document.createElement('div');
+   if (!m) { row.textContent = text; return row; }
+   row.className = m[2] + '-line';
+   for (const [cls, value] of [['ts', m[1] + ' '], ['lvl ' + m[2], m[2]], ['msg', m[3]]]) {
+    const span = document.createElement('span'); span.className = cls; span.textContent = value; row.append(span);
+   }
+   return row;
+  }));
+  if ($('autoscroll').checked) log.scrollTop=log.scrollHeight;
+ }
  function seconds(s) {s=Math.floor(s||0); return `${Math.floor(s/3600)}h ${fmt(Math.floor(s%3600/60))}m ${fmt(s%60)}s`;}
  async function poll(){
   try {
@@ -95,7 +133,7 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
    if(data.reset || (data.last_id < last)){ last=0; lines=[]; }
    for(const e of data.entries){ last=Math.max(last,e.id); lines.push(`[${formatTime(e.time)}] ${e.level.padEnd(7)} ${e.message}`); }
    if(lines.length>600) lines=lines.slice(-600);
-   render(); $('stall').textContent=data.status.stall; $('camera').textContent=data.status.camera;
+   render(); $('stall').textContent=data.status.stall; $('stall').dataset.state=data.status.stall; $('camera').textContent=data.status.camera;
    $('plate').textContent=data.status.last_plate||'—';
    $('plate-state').textContent=data.status.last_plate ? data.status.last_plate_state || 'Unknown' : '—';
    $('motion').textContent=data.status.motion_events;
@@ -109,8 +147,8 @@ footer {margin-top:14px; color:var(--muted); font-size:12px}
      $('garage-key').value = data.status.last_plate;
      prefilledPlate = data.status.last_plate;
    }
-   $('connection').textContent='Live · Connected'; connected=true;
-  }catch(e){$('connection').textContent='Disconnected';connected=false; }
+   $('connection').textContent='Live · Connected'; $('connection').classList.remove('down'); connected=true;
+  }catch(e){$('connection').textContent='Disconnected';$('connection').classList.add('down');connected=false; }
  }
  $('garage-form').onsubmit=async event=>{
    event.preventDefault();
