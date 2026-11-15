@@ -1,13 +1,16 @@
 """One outbound snapshot worker for the Databricks camera setup API."""
 
 import json
+import os
+import sqlite3
 from base64 import b64encode
+from contextlib import closing
 from threading import Event, Lock, Thread
 from time import monotonic
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import cv2
 
@@ -90,6 +93,11 @@ class DeviceClient:
     def setup_state(self):
         return json.loads(self.call("/request"))
 
+    def send_garage_read(self, event_id, zone, plate):
+        return json.loads(self.call("/garage-read", data=json.dumps({
+            "id": event_id, "zone": zone, "plate": plate,
+        }).encode(), headers={"Content-Type": "application/json"}))
+
     def publish(self, request_id, frame):
         height, width = frame.shape[:2]
         ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
@@ -110,6 +118,9 @@ class CameraSetupBridge:
         self.frame = None
         self.layout_path = layout_path
         self.calibration = None
+        self.garage_enabled = False
+        self.garage_retry_at = 0.0
+        self.garage_queue = layout_path.with_name("garage-outbox.sqlite")
         try:
             self.set_calibration(json.loads(layout_path.read_text()), cache=False)
         except FileNotFoundError:
@@ -152,6 +163,42 @@ class CameraSetupBridge:
             layout = self.calibration
         return detection_regions(layout, width, height)
 
+    def enqueue_garage_read(self, zone, plate):
+        if not self.garage_enabled:
+            return
+        try:
+            self.garage_queue.parent.mkdir(parents=True, exist_ok=True)
+            os.close(os.open(self.garage_queue, os.O_CREAT | os.O_WRONLY, 0o600))
+            with closing(sqlite3.connect(self.garage_queue)) as conn, conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS pending (
+                    seq INTEGER PRIMARY KEY, id TEXT NOT NULL, zone TEXT NOT NULL,
+                    plate TEXT NOT NULL)""")
+                conn.execute("INSERT INTO pending (id, zone, plate) VALUES (?, ?, ?)",
+                             (str(uuid4()), zone, plate))
+        except (OSError, sqlite3.Error):
+            self.log.exception("Could not queue garage read")
+
+    def sync_garage_read(self):
+        if not self.garage_enabled or monotonic() < self.garage_retry_at:
+            return
+        if not self.garage_queue.is_file():
+            return
+        try:
+            with closing(sqlite3.connect(self.garage_queue)) as conn:
+                row = conn.execute(
+                    "SELECT seq, id, zone, plate FROM pending ORDER BY seq LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return
+                seq, event_id, zone, plate = row
+                outcome = self.client.send_garage_read(event_id, zone, plate)["outcome"]
+                with conn:
+                    conn.execute("DELETE FROM pending WHERE seq = ?", (seq,))
+                self.log.info("Garage %s for %s: %s", zone, plate, outcome)
+        except (URLError, OSError, sqlite3.Error, ValueError, KeyError):
+            self.garage_retry_at = monotonic() + 15
+            self.log.warning("Garage update unavailable; queued reads will retry")
+
     def set_calibration(self, layout, *, cache=True):
         if layout == self.calibration:
             return
@@ -171,6 +218,7 @@ class CameraSetupBridge:
     def poll(self):
         state = self.client.setup_state()
         request_id = UUID(state["id"]) if state["id"] else None
+        self.garage_enabled = state.get("garage_enabled") is True
         if "calibration" in state:
             try:
                 self.set_calibration(state["calibration"])
@@ -193,6 +241,7 @@ class CameraSetupBridge:
         while not self.stop_event.is_set():
             try:
                 self.poll()
+                self.sync_garage_read()
                 wait = 1
             except (URLError, OSError, ValueError, KeyError, TypeError, cv2.error) as error:
                 if wait == 1:

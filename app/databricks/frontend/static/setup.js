@@ -2,12 +2,11 @@
 const $ = (id) => document.getElementById(id);
 const root = "/api/camera-setup";
 const hints = {
-  divider: "Drag from one end of the divider to the other. The arrow shows entry direction.",
   entry: "Drag a box around the area where incoming plates should be visible.",
   exit: "Drag a box around the area where outgoing plates should be visible."
 };
 const tools = [...$("tools").querySelectorAll("button")];
-let active = "divider";
+let active = "entry";
 let snapshot = null;
 let drawing = null;
 let layout = {};
@@ -23,7 +22,7 @@ function message(text) {
 async function request(path = "", options = {}) {
   const response = await fetch(root + path, {cache: "no-store", ...options});
   const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Check the layout and try again.");
+  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.[0]?.msg || "Check the layout and try again.");
   return data;
 }
 
@@ -38,35 +37,15 @@ function render() {
     element.toggleAttribute("hidden", !zone);
     if (zone) attrs(element, zone);
   }
-  $("dividerShape").toggleAttribute("hidden", !layout.divider);
-  $("directionShape").toggleAttribute("hidden", !layout.divider);
-  if (layout.divider) {
-    const [a, b] = layout.divider;
-    attrs($("dividerShape"), {x1:a.x, y1:a.y, x2:b.x, y2:b.y});
-    const dx = (b.x - a.x) * snapshot.width;
-    const dy = (b.y - a.y) * snapshot.height;
-    const length = Math.hypot(dx, dy);
-    if (length > 0) {
-      const sign = layout.reverse ? -1 : 1;
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2;
-      const half = Math.min(snapshot.width, snapshot.height) * 0.045;
-      const x = sign * -dy / length * half / snapshot.width;
-      const y = sign * dx / length * half / snapshot.height;
-      attrs($("directionShape"), {x1:mx-x, y1:my-y, x2:mx+x, y2:my+y});
-    }
-  }
   $("capture").disabled = busy;
-  $("save").disabled = busy || !ready || !layout.divider || !layout.entry || !layout.exit;
+  $("save").disabled = busy || !ready || !layout.entry || !layout.exit;
   $("reset").disabled = busy || !ready;
-  $("reverse").disabled = busy || !ready || !layout.divider;
 }
 
 function openSnapshot(state) {
   snapshot = state.snapshot;
   layout = state.calibration ? {
-    divider:state.calibration.divider, entry:state.calibration.entry,
-    exit:state.calibration.exit, reverse:state.calibration.reverse
+    entry:state.calibration.entry, exit:state.calibration.exit
   } : {};
   ready = false;
   $("preview").hidden = true;
@@ -94,7 +73,6 @@ function point(event) {
   return {x:clamp((event.clientX - rect.left) / rect.width), y:clamp((event.clientY - rect.top) / rect.height)};
 }
 function shape(a, b) {
-  if (active === "divider") return [a,b];
   return {x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), width:Math.abs(a.x-b.x), height:Math.abs(a.y-b.y)};
 }
 
@@ -114,7 +92,7 @@ overlay.onpointerup = overlay.onpointercancel = event => {
   const end = point(event);
   const dx = Math.abs(end.x - drawing.start.x);
   const dy = Math.abs(end.y - drawing.start.y);
-  const valid = active === "divider" ? Math.hypot(dx, dy) >= .02 : dx >= .02 && dy >= .02;
+  const valid = dx >= .02 && dy >= .02;
   layout[active] = event.type === "pointerup" && valid ? shape(drawing.start,end) : drawing.previous;
   drawing = null;
   render();
@@ -125,7 +103,7 @@ overlay.onkeydown = event => {
   if (!direction || !current || busy || !ready || drawing) return;
   event.preventDefault();
   const step = event.shiftKey ? .02 : .005;
-  const bounds = active === "divider" ? current : [
+  const bounds = [
     {x:current.x, y:current.y},
     {x:current.x + current.width, y:current.y + current.height}
   ];
@@ -135,8 +113,7 @@ overlay.onkeydown = event => {
   );
   const x = shift("x", direction[0] * step);
   const y = shift("y", direction[1] * step);
-  layout[active] = active === "divider" ? current.map(point => ({x:point.x + x, y:point.y + y})) :
-    {...current, x:current.x + x, y:current.y + y};
+  layout[active] = {...current, x:current.x + x, y:current.y + y};
   render();
 };
 
@@ -151,14 +128,13 @@ for (const button of tools) {
 
 window.addEventListener("keydown", (event) => {
   if (drawing || event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") return;
-  const toolMap = {"1": "divider", "2": "entry", "3": "exit"};
+  const toolMap = {"1": "entry", "2": "exit"};
   if (toolMap[event.key]) {
     const targetTool = toolMap[event.key];
     const button = tools.find(b => b.dataset.tool === targetTool);
     if (button) button.click();
   }
 });
-$("reverse").onclick = () => { layout.reverse = !layout.reverse; render(); };
 $("reset").onclick = () => { layout = {}; message("Drawing cleared. Save a new layout to replace the stored one."); render(); };
 
 $("capture").onclick = async () => {
@@ -173,7 +149,7 @@ $("capture").onclick = async () => {
       const state = await request();
       if (state.snapshot?.id === result.id) {
         openSnapshot(state);
-        message("Reference captured. Check the divider and zones before saving.");
+        message("Reference captured. Check both zones before saving.");
         return;
       }
       if (state.pending !== result.id) break;
@@ -195,8 +171,7 @@ $("save").onclick = async () => {
     await request("/calibration", {
       method:"PUT", headers:{"Content-Type":"application/json", "X-ParkSight-Setup":"1"},
       body:JSON.stringify({
-        reference_id:snapshot.id, divider:layout.divider, entry:layout.entry, exit:layout.exit,
-        reverse:!!layout.reverse
+        reference_id:snapshot.id, entry:layout.entry, exit:layout.exit
       })
     });
     message("Layout saved.");
@@ -210,5 +185,5 @@ $("save").onclick = async () => {
 
 request().then(state => {
   openSnapshot(state);
-  message(state.calibration ? "Saved layout loaded." : state.snapshot ? "Draw the divider and both zones." : "");
+  message(state.calibration ? "Saved layout loaded." : state.snapshot ? "Draw both zones." : "");
 }).catch(error => message(error.message));

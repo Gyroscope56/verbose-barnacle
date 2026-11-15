@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.databricks.api.camera_setup import camera_setup_router
+from app.databricks.api.garage_events import record_read
 from app.databricks.frontend.app import create_app
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,10 +26,8 @@ DB = environ.get("PARKSIGHT_TEST_POSTGRES")
 OPERATOR = {"X-Forwarded-User": "operator", "X-ParkSight-Setup": "1"}
 DEVICE = {"X-ParkSight-Device-Key": "device-key"}
 LAYOUT = {
-    "divider": [{"x": 0.5, "y": 0.1}, {"x": 0.5, "y": 0.9}],
     "entry": {"x": 0.12, "y": 0.3, "width": 0.3, "height": 0.4},
     "exit": {"x": 0.55, "y": 0.3, "width": 0.3, "height": 0.4},
-    "reverse": True,
 }
 
 
@@ -108,6 +107,17 @@ class CaptureTest(unittest.TestCase):
         self.addCleanup(self.drop_schema)
         with self.connect() as conn:
             conn.execute((ROOT / "app/databricks/api/schema.sql").read_text())
+            conn.execute((ROOT / "app/databricks/api/garage_schema.sql").read_text())
+            conn.execute("""
+                CREATE TABLE g_sessions (
+                    license_plate text PRIMARY KEY, has_entrance_ticket boolean NOT NULL,
+                    time_in timestamptz, time_out timestamptz
+                );
+                CREATE TABLE garage_visit_history (
+                    license_plate text NOT NULL, has_entrance_ticket boolean NOT NULL,
+                    time_in timestamptz NOT NULL, time_out timestamptz NOT NULL
+                );
+            """)
         self.api = self.start_api()
 
     def connect(self):
@@ -121,7 +131,7 @@ class CaptureTest(unittest.TestCase):
         app = FastAPI()
         app.include_router(
             camera_setup_router(
-                self.connect, "entrance-camera", {"operator"}, "device-key"
+                self.connect, "entrance-camera", {"operator"}, "device-key", record_read
             )
         )
         return TestClient(app)
@@ -190,6 +200,7 @@ class CaptureTest(unittest.TestCase):
             json={**LAYOUT, "reference_id": request_id},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn("divider", response.json())
         bridge.poll()
         self.assertEqual(
             bridge.regions(1280, 720),
@@ -263,3 +274,53 @@ class CaptureTest(unittest.TestCase):
             ).status_code,
             422,
         )
+
+    def test_zone_reads_update_existing_booking_once(self):
+        path = "/api/camera-setup/device/garage-read"
+        entry = {"id": str(uuid4()), "zone": "entry", "plate": "ABC1234"}
+        self.assertEqual(self.api.post(path, json=entry).status_code, 403)
+        self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
+                         {"outcome": "unbooked"})
+
+        with self.connect() as conn:
+            conn.execute("INSERT INTO g_sessions VALUES ('WI-ABC-1234', TRUE, NULL, NULL)")
+        self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
+                         {"outcome": "unbooked"})
+        entry["id"] = str(uuid4())
+        self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
+                         {"outcome": "inside"})
+        self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
+                         {"outcome": "inside"})
+        exit_read = {**entry, "id": str(uuid4()), "zone": "exit"}
+        for _ in range(2):
+            self.assertEqual(self.api.post(path, json=exit_read, headers=DEVICE).json(),
+                             {"outcome": "exited"})
+        with self.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM g_sessions").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM garage_visit_history").fetchone()[0], 1)
+            conn.execute("""INSERT INTO g_sessions VALUES
+                            ('IL-ABC-1234', TRUE, NULL, NULL), ('WI-ABC-1234', TRUE, NULL, NULL)""")
+        entry["id"] = str(uuid4())
+        self.assertEqual(self.api.post(path, json=entry, headers=DEVICE).json(),
+                         {"outcome": "ambiguous"})
+
+    def test_queue_retries_with_same_event_id_after_restart(self):
+        with TemporaryDirectory() as directory:
+            layout_path = Path(directory) / "layout.json"
+            client = Mock()
+            bridge = module.CameraSetupBridge(client, Mock(), layout_path)
+            bridge.garage_enabled = True
+            bridge.enqueue_garage_read("entry", "ABC1234")
+            client.send_garage_read.side_effect = OSError
+            bridge.sync_garage_read()
+            args = client.send_garage_read.call_args.args
+
+            restarted = module.CameraSetupBridge(client, Mock(), layout_path)
+            restarted.garage_enabled = True
+            client.send_garage_read.side_effect = None
+            client.send_garage_read.return_value = {"outcome": "inside"}
+            restarted.sync_garage_read()
+            client.send_garage_read.assert_called_with(*args)
+            client.send_garage_read.reset_mock()
+            restarted.sync_garage_read()
+            client.send_garage_read.assert_not_called()

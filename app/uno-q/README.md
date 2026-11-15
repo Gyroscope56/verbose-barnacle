@@ -37,4 +37,4 @@ The [camera setup plan](docs/camera-setup-plan.md) covers the future installed-c
 
 ## Databricks camera setup bridge
 
-The optional outbound setup worker serves the [Databricks calibration editor](../databricks/README.md). It is disabled until a local `camera-setup.json` enables it. The camera remains under the existing capture loop. Saved entry and exit zones limit the motion and plate search on the next burst. The board uses its default approach region if it has no compatible layout.
+The optional outbound setup worker serves the [Databricks calibration editor](../databricks/README.md). It is disabled until a local `camera-setup.json` enables it. The camera remains under the existing capture loop. Saved entry and exit zones limit the motion and plate search on the next burst. With the garage API enabled, the board queues confirmed zone reads and retries them using the same event IDs. The board uses its default approach region if it has no compatible layout.

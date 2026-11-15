@@ -2,6 +2,7 @@
 
 from hmac import compare_digest
 from io import BytesIO
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
@@ -11,11 +12,6 @@ from pydantic import BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 MAX_IMAGE_BYTES = 1024 * 1024
-
-
-class Point(BaseModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
 
 
 class Zone(BaseModel):
@@ -33,20 +29,25 @@ class Zone(BaseModel):
 
 class Calibration(BaseModel):
     reference_id: UUID
-    divider: tuple[Point, Point]
     entry: Zone
     exit: Zone
-    reverse: bool = False
 
     @model_validator(mode="after")
-    def valid_divider(self):
-        a, b = self.divider
-        if (a.x - b.x) ** 2 + (a.y - b.y) ** 2 < 0.02**2:
-            raise ValueError("Draw a divider with two distinct endpoints")
+    def separate_zones(self):
+        a, b = self.entry, self.exit
+        if (min(a.x + a.width, b.x + b.width) - max(a.x, b.x) > 1e-6
+                and min(a.y + a.height, b.y + b.height) - max(a.y, b.y) > 1e-6):
+            raise ValueError("Entry and exit zones must not overlap")
         return self
 
 
-def camera_setup_router(connect, camera_id, operators, device_key):
+class GarageRead(BaseModel):
+    id: UUID
+    zone: Literal["entry", "exit"]
+    plate: str = Field(pattern=r"^[A-Z0-9]{5,8}$")
+
+
+def camera_setup_router(connect, camera_id, operators, device_key, record_read=None):
     """Connect is the existing backend's PostgreSQL connection factory."""
     if not operators or not device_key:
         raise ValueError("Camera setup requires allowed operators and a device key")
@@ -68,7 +69,8 @@ def camera_setup_router(connect, camera_id, operators, device_key):
         if calibration is not None and width and height:
             old_width, old_height = calibration["image_size"]
             if old_width * height == width * old_height:
-                return calibration
+                return {key: value for key, value in calibration.items()
+                        if key not in {"divider", "reverse"}}
         return None
 
     @router.get("")
@@ -166,9 +168,20 @@ def camera_setup_router(connect, camera_id, operators, device_key):
                 (camera_id,),
             ).fetchone()
         if row is None:
-            return {"id": None, "calibration": None}
+            return {"id": None, "calibration": None, "garage_enabled": record_read is not None}
         request_id, calibration, width, height = row
-        return {"id": request_id, "calibration": compatible_calibration(calibration, width, height)}
+        return {
+            "id": request_id,
+            "calibration": compatible_calibration(calibration, width, height),
+            "garage_enabled": record_read is not None,
+        }
+
+    if record_read is not None:
+        @router.post("/device/garage-read")
+        def garage_read(read: GarageRead, x_parksight_device_key: str = Header(default="")):
+            require_device(x_parksight_device_key)
+            with connect() as conn:
+                return record_read(conn, camera_id, read.id, read.zone, read.plate)
 
     def store_snapshot(request_id, jpeg, width, height):
         try:

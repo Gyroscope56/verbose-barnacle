@@ -414,18 +414,6 @@ svg .exit {
   stroke-dasharray: 6 3;
 }
 
-svg .divider {
-  stroke: var(--tertiary-container);
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-
-svg .direction {
-  stroke: var(--tertiary-container);
-  stroke-width: 2.25;
-  stroke-dasharray: 4 2;
-}
-
 .camera-footer {
   padding: 0.65rem 1.125rem;
   background-color: var(--surface-container-low);
@@ -553,13 +541,6 @@ svg .direction {
   background-color: rgba(90, 95, 99, 0.2);
 }
 
-.tool-swatch.divider {
-  color: var(--tertiary-container);
-  background-color: var(--tertiary-container);
-  height: 4px;
-  border-radius: 2px;
-}
-
 .tool-shortcut {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -641,23 +622,6 @@ button.primary:hover:not(:disabled) {
 
 button.primary:active:not(:disabled) {
   transform: translateY(0);
-}
-
-.secondary-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.55rem 0.875rem;
-  background-color: var(--surface-container-lowest);
-  color: var(--on-surface);
-  border: 1px solid var(--outline-variant);
-}
-
-.secondary-action:hover:not(:disabled) {
-  background-color: var(--surface-container-low);
-  border-color: var(--outline);
 }
 
 .actions {

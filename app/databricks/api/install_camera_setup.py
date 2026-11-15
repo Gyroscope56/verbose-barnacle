@@ -22,12 +22,17 @@ def install_camera_setup(app):
             dsn, connect_timeout=4, options="-c statement_timeout=5000"
         )
 
+    record_read = None
+    if os.environ.get("PARKSIGHT_GARAGE_ENABLED") == "1":
+        from garage_events import record_read
+
     app.include_router(
         camera_setup_router(
             connect,
             os.environ.get("PARKSIGHT_CAMERA_ID", "entrance-camera"),
             operators,
             key,
+            record_read,
         )
     )
     return True

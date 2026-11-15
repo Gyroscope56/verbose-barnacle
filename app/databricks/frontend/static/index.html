@@ -28,7 +28,7 @@
     <header class="intro">
       <div class="intro-heading">
         <h1>Camera calibration</h1>
-        <p class="lead">Capture the installed field of view, then demarcate the lane divider and directional detection zones.</p>
+        <p class="lead">Capture a reference image, then mark where entering and exiting plates are visible.</p>
       </div>
       <button id="capture" class="primary" type="button">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
@@ -68,16 +68,8 @@
           <img id="reference" alt="Installed camera reference view">
           <svg id="overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" tabindex="0"
                aria-label="Draw the selected shape or move it with the arrow keys">
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
-                      markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 8 5 L 0 8.5" fill="none" stroke="#bfab49" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </marker>
-            </defs>
             <rect id="entryShape" class="entry" hidden/>
             <rect id="exitShape" class="exit" hidden/>
-            <line id="dividerShape" class="divider" hidden/>
-            <line id="directionShape" class="direction" marker-end="url(#arrow)" hidden/>
           </svg>
         </div>
 
@@ -95,26 +87,19 @@
         <div class="tool-section">
           <label class="section-label">Active Overlay Tool</label>
           <div class="tools" id="tools">
-            <button data-tool="divider" aria-pressed="true" type="button">
-              <span class="tool-left">
-                <span class="tool-swatch divider" aria-hidden="true"></span>
-                <span class="tool-name">Divider Line</span>
-              </span>
-              <span class="tool-shortcut">1</span>
-            </button>
-            <button data-tool="entry" aria-pressed="false" type="button">
+            <button data-tool="entry" aria-pressed="true" type="button">
               <span class="tool-left">
                 <span class="tool-swatch entry" aria-hidden="true"></span>
                 <span class="tool-name">Entry Zone</span>
               </span>
-              <span class="tool-shortcut">2</span>
+              <span class="tool-shortcut">1</span>
             </button>
             <button data-tool="exit" aria-pressed="false" type="button">
               <span class="tool-left">
                 <span class="tool-swatch exit" aria-hidden="true"></span>
                 <span class="tool-name">Exit Zone</span>
               </span>
-              <span class="tool-shortcut">3</span>
+              <span class="tool-shortcut">2</span>
             </button>
           </div>
         </div>
@@ -123,16 +108,7 @@
           <div class="guidance-header">
             <span class="guidance-label">Instruction</span>
           </div>
-          <p class="hint" id="hint">Drag from one end of the divider to the other. The arrow shows entry direction.</p>
-        </div>
-
-        <div class="controls-row">
-          <button id="reverse" class="secondary-action" type="button" disabled>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-              <path d="M3 6h7a3 3 0 0 1 3 3v1M6 3L3 6l3 3"/>
-            </svg>
-            <span>Reverse entry direction</span>
-          </button>
+          <p class="hint" id="hint">Drag a box around the area where incoming plates should be visible.</p>
         </div>
 
         <div class="actions">
@@ -141,7 +117,7 @@
         </div>
 
         <div class="grounding-note">
-          <p>The UNO Q uses the saved zones for plate detection. The divider marks the planned crossing line.</p>
+          <p>Keep the boxes separate. A confirmed plate in the entry zone can admit a booked vehicle. A confirmed plate in the exit zone can close its open visit.</p>
         </div>
       </aside>
     </div>

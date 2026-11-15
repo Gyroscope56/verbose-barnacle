@@ -196,7 +196,7 @@ def read_frame(index, frame, box, ocr):
     return corrected, details
 
 
-def recognize_burst(frames, zone=None, region=None):
+def recognize_burst(frames, zone=None, region=None, garage_enabled=False):
     STORE.increment("ocr_attempts")
     LOG.info("Recognition triggered on %d frame(s) in %s", len(frames), zone or "default view")
     models = get_models()
@@ -238,6 +238,8 @@ def recognize_burst(frames, zone=None, region=None):
                     LOG.exception("Issuing state OCR failed; keeping the confirmed plate read")
                 STORE.increment("plate_reads")
                 STORE.set(last_plate=plate, last_plate_state=state)
+                if garage_enabled and _camera_setup is not None:
+                    _camera_setup.enqueue_garage_read(zone, plate)
                 decision = (f"Confirmed {plate} on {count} of {len(frames)} frames. "
                             f"Issuing state guess: {state or 'Unknown'}")
         LOG.info("%s", decision)
@@ -276,6 +278,13 @@ def motion_fraction(frame, background, region):
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     mask = background.apply(cv2.GaussianBlur(gray, (5, 5), 0))
     return cv2.countNonZero(mask) / mask.size
+
+
+def separate_regions(regions):
+    if len(regions) != 2:
+        return False
+    (_, a), (_, b) = regions
+    return min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1])
 
 
 def poll_stall(last_stall):
@@ -377,7 +386,9 @@ def run_camera(camera, worker):
             if len(burst) == BURST_FRAMES:
                 if ocr_job is None:
                     region = dict(active_regions).get(burst_zone)
-                    ocr_job = worker.submit(recognize_burst, burst, burst_zone, region)
+                    ocr_job = worker.submit(
+                        recognize_burst, burst, burst_zone, region, separate_regions(active_regions)
+                    )
                 burst = []
     finally:
         STORE.set(camera="waiting for camera")
